@@ -1,12 +1,145 @@
-Soapbox
-Copyright 2026 Monis Khan
+monis.app/kk/rbac_authorizer
 
-This product is licensed under the Apache License, Version 2.0.
+the Kubernetes RBAC authorizer as an independently consumable Go module.
 
-Soapbox generates derivative source from the Kubernetes project. Generated
-repositories retain upstream copyright and attribution notices and include
-file-level and package-level records describing relocation, rewriting,
-pruning, patches, and source revisions.
+Origin
+------
 
-Kubernetes is a project of The Linux Foundation. Kubernetes source is
-available at https://github.com/kubernetes/kubernetes.
+This module is a derivative work. It contains source code copied from
+k8s.io/kubernetes and modified by soapbox. It is not a distribution of
+k8s.io/kubernetes itself, and it is not produced by, endorsed by, or
+affiliated with the Kubernetes project.
+
+  upstream module: k8s.io/kubernetes
+  upstream repository: https://github.com/kubernetes/kubernetes.git
+  upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+  upstream release: v1.36.1
+  generated module: monis.app/kk/rbac_authorizer
+  generated repository: https://github.com/enj/rbac_authorizer.git
+  relocated below: internal/kk
+  licence: Apache-2.0
+  extracted upstream packages:
+    pkg/apis/rbac/v1
+    pkg/registry/rbac/validation
+    plugin/pkg/auth/authorizer/rbac
+
+Modifications
+-------------
+
+Files copied from k8s.io/kubernetes were changed. Every changed file carries a
+notice saying so above its package clause, and every relocated package carries
+a SOAPBOX_PROVENANCE.txt record naming its upstream path, its upstream commit,
+and each change made to it. The changes are of three kinds: import paths were
+rewritten to the relocated paths inside this module, files the profile prunes
+were not copied at all, and any patches listed below were applied before
+relocation.
+
+  relocated packages:
+    internal/kk/pkg/apis/rbac/v1  (from pkg/apis/rbac/v1)
+    internal/kk/pkg/registry/rbac/validation  (from pkg/registry/rbac/validation)
+    internal/kk/plugin/pkg/auth/authorizer/rbac  (from plugin/pkg/auth/authorizer/rbac)
+
+  changed files:
+    internal/kk/pkg/apis/rbac/v1/doc.go
+    internal/kk/pkg/registry/rbac/validation/rule.go
+    internal/kk/plugin/pkg/auth/authorizer/rbac/rbac.go
+    internal/kk/plugin/pkg/auth/authorizer/rbac/subject_locator.go
+
+  pruned upstream files:
+    pkg/apis/rbac/v1/defaults.go
+    pkg/apis/rbac/v1/helpers.go
+    pkg/apis/rbac/v1/register.go
+    pkg/apis/rbac/v1/zz_generated.conversion.go
+    pkg/apis/rbac/v1/zz_generated.deepcopy.go
+    pkg/apis/rbac/v1/zz_generated.defaults.go
+    pkg/apis/rbac/v1/zz_generated.validations.go
+    pkg/registry/rbac/validation/internal_version_adapter.go
+
+  applied patches:
+    (none)
+
+Behavior changes
+----------------
+
+These differences from the upstream code are intended. They are recorded here
+because they change what the code does rather than where it lives, so no diff
+of the copied files would reveal them.
+
+  - +k8s:conversion-gen=k8s.io/kubernetes/pkg/apis/rbac no longer performs its conversion effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    a retained file still carries a generator directive naming the pruned package,
+    so the directive is stripped and recorded in provenance. It is not reachable
+    through the generated public API.
+  - +k8s:deepcopy-gen=false no longer performs its conversion effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    a retained file still carries a generator directive naming the pruned package,
+    so the directive is stripped and recorded in provenance. It is not reachable
+    through the generated public API.
+  - +k8s:deepcopy-gen=package no longer performs its conversion effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    a retained file still carries a generator directive naming the pruned package,
+    so the directive is stripped and recorded in provenance. It is not reachable
+    through the generated public API.
+  - +k8s:defaulter-gen=TypeMeta no longer performs its conversion effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    a retained file still carries a generator directive naming the pruned package,
+    so the directive is stripped and recorded in provenance. It is not reachable
+    through the generated public API.
+  - k8s.io/kubernetes/pkg/apis/rbac.AddToScheme no longer performs its schemeRegistration effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    the package registers its types into a scheme at import time, and pruning it
+    means those types are no longer registered. It is not reachable through the
+    generated public API.
+  - k8s.io/kubernetes/pkg/apis/rbac.SchemeBuilder no longer performs its globalMutation effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    the package level initializer calls
+    k8s.io/apimachinery/pkg/runtime.NewSchemeBuilder at import time, and pruning
+    the package stops that call happening. It is not reachable through the
+    generated public API.
+  - k8s.io/kubernetes/pkg/apis/rbac.SchemeBuilder no longer performs its schemeRegistration effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    the package registers its types into a scheme at import time, and pruning it
+    means those types are no longer registered. It is not reachable through the
+    generated public API.
+  - k8s.io/kubernetes/pkg/apis/rbac.SchemeGroupVersion no longer performs its schemeRegistration effect at import time.
+    cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
+    the package registers its types into a scheme at import time, and pruning it
+    means those types are no longer registered. It is not reachable through the
+    generated public API.
+
+Staging module mapping
+----------------------
+
+The upstream repository requires its staging modules through repository local
+directories, which a consumer outside that repository cannot resolve. Each was
+replaced by the published module version that corresponds to the upstream
+commit above.
+
+  mapping:
+    staging/src/k8s.io/api -> k8s.io/api@v0.36.1
+    staging/src/k8s.io/apimachinery -> k8s.io/apimachinery@v0.36.1
+    staging/src/k8s.io/apiserver -> k8s.io/apiserver@v0.36.1
+    staging/src/k8s.io/client-go -> k8s.io/client-go@v0.36.1
+    staging/src/k8s.io/component-base -> k8s.io/component-base@v0.36.1
+    staging/src/k8s.io/component-helpers -> k8s.io/component-helpers@v0.36.1
+
+Copied dependency packages
+--------------------------
+
+No dependency package was copied into this module. Every dependency is
+required as a published module, so its types keep the identity the rest of the
+ecosystem uses.
+
+Trademarks
+----------
+
+Section 6 of the Apache License 2.0 grants no rights to the trade names,
+trademarks, service marks, or product names of the upstream licensor. The
+Kubernetes name and marks belong to their owners and are used here only as
+required to identify the origin of the copied code. This module is not a
+Kubernetes release and its maintainers do not speak for that project.
+
+Upstream notices
+----------------
+
+The upstream work at the commit above carries no NOTICE file.

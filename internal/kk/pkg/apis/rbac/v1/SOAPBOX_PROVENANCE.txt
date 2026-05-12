@@ -1,0 +1,31 @@
+soapbox package provenance
+package: internal/kk/pkg/apis/rbac/v1
+upstream package: pkg/apis/rbac/v1
+upstream repository: https://github.com/kubernetes/kubernetes.git
+upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+
+files:
+  internal/kk/pkg/apis/rbac/v1/doc.go
+    upstream: pkg/apis/rbac/v1/doc.go
+    17 marker-removal - // +k8s:conversion-gen=k8s.io/kubernetes/pkg/apis/rbac
+    19 marker-removal - // +k8s:defaulter-gen=TypeMeta
+    20 marker-removal - // +k8s:defaulter-gen-input=k8s.io/api/rbac/v1
+    21 marker-removal - // +k8s:deepcopy-gen=package
+    22 marker-removal - // +k8s:validation-gen=TypeMeta
+    23 marker-removal - // +k8s:validation-gen-input=k8s.io/api/rbac/v1
+    27 notice + // This file was modified by soapbox and is not the upstream original. ...
+  internal/kk/pkg/apis/rbac/v1/evaluation_helpers.go
+    upstream: pkg/apis/rbac/v1/evaluation_helpers.go
+    unchanged
+
+pruned:
+  pkg/apis/rbac/v1/defaults.go
+  pkg/apis/rbac/v1/helpers.go
+  pkg/apis/rbac/v1/register.go
+  pkg/apis/rbac/v1/zz_generated.conversion.go
+  pkg/apis/rbac/v1/zz_generated.deepcopy.go
+  pkg/apis/rbac/v1/zz_generated.defaults.go
+  pkg/apis/rbac/v1/zz_generated.validations.go
+
+patches:
+  (none)

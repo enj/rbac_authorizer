@@ -1,0 +1,22 @@
+soapbox package provenance
+package: internal/kk/plugin/pkg/auth/authorizer/rbac
+upstream package: plugin/pkg/auth/authorizer/rbac
+upstream repository: https://github.com/kubernetes/kubernetes.git
+upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+
+files:
+  internal/kk/plugin/pkg/auth/authorizer/rbac/rbac.go
+    upstream: plugin/pkg/auth/authorizer/rbac/rbac.go
+    17 notice + // This file was modified by soapbox and is not the upstream original. ...
+    33 import k8s.io/kubernetes/pkg/apis/rbac/v1 -> monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1
+    34 import k8s.io/kubernetes/pkg/registry/rbac/validation -> monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation
+  internal/kk/plugin/pkg/auth/authorizer/rbac/subject_locator.go
+    upstream: plugin/pkg/auth/authorizer/rbac/subject_locator.go
+    17 notice + // This file was modified by soapbox and is not the upstream original. ...
+    27 import k8s.io/kubernetes/pkg/registry/rbac/validation -> monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation
+
+pruned:
+  (none)
+
+patches:
+  (none)
