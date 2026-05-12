@@ -27,10 +27,17 @@
     "entries": 0
   },
   "tracks": [],
-  "published": [],
+  "published": [
+    {
+      "ref": "refs/heads/main",
+      "kind": "branch",
+      "object": "4dd98edb6a37f4c1c600d67c7970b51fda13185d",
+      "source": "756939600b9a7180fc2df6550a4585b638875e67"
+    }
+  ],
   "engine": {
     "version": "0.1.0",
     "toolchain": "go1.26.5"
   },
-  "digest": "sha256:d37ead6bd0e40468eff24508d49c0c236767757a347b72414851bf7354936283"
+  "digest": "sha256:a6185a2c51314a9173ad0cf854dd8d8337cc07f34b3785007f738c2721427783"
 }
