@@ -19,8 +19,8 @@ licence, and trademark statement, and for the record of what was changed.
 | --- | --- |
 | upstream module | `k8s.io/kubernetes` |
 | upstream repository | `https://github.com/kubernetes/kubernetes.git` |
-| upstream commit | `756939600b9a7180fc2df6550a4585b638875e67` |
-| upstream release | `v1.36.1` |
+| upstream commit | `24e2b02af5543d7910c2bb074c7264df5a8f0467` |
+| upstream release | `v1.36.2` |
 | relocated below | `internal/kk` |
 
 ## Public API
@@ -30,26 +30,40 @@ name below is an alias of, or forwards to, the relocated upstream declaration
 it was generated from, so a value it produces is the upstream value and an
 implementation of an interface it publishes satisfies the upstream contract.
 
+- `Attributes`
+- `AttributesRecord`
 - `AuthorizationRuleResolver`
+- `Authorizer`
 - `ClusterRoleBindingLister`
 - `ClusterRoleBindingListerFromLister`
 - `ClusterRoleGetter`
 - `ClusterRoleGetterFromLister`
+- `Decision`
+- `DecisionAllow`
+- `DecisionDeny`
+- `DecisionNoOpinion`
+- `DefaultNonResourceRuleInfo`
+- `DefaultResourceRuleInfo`
 - `DefaultRuleResolver`
+- `DefaultUserInfo`
 - `New`
 - `NewDefaultRuleResolver`
 - `NewSubjectAccessEvaluator`
+- `NonResourceRuleInfo`
 - `RBACAuthorizer`
 - `RequestToRuleMapper`
+- `ResourceRuleInfo`
 - `RoleBindingLister`
 - `RoleBindingListerFromLister`
 - `RoleGetter`
 - `RoleGetterFromLister`
 - `RoleToRuleMapper`
 - `RuleAllows`
+- `RuleResolver`
 - `RulesAllow`
 - `SubjectAccessEvaluator`
 - `SubjectLocator`
+- `UserInfo`
 
 ## Usage
 

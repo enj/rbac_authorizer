@@ -3,14 +3,13 @@
 package rbacauthorizer
 
 import (
-	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/authorizer"
 )
 
-// These assertions prove that the published types implement the upstream
-// interfaces the relocated code was written against. The interfaces are the
-// real ones from their own modules rather than copies, so an assertion here
-// is a statement about interoperability with the wider ecosystem and not
-// about this module's internal consistency.
+// These assertions prove that the published types implement the module-local
+// compatibility interfaces selected by the profile. They establish internal
+// consistency only and make no interoperability claim about
+// k8s.io/apiserver.
 var (
 	_ authorizer.Authorizer   = (*RBACAuthorizer)(nil)
 	_ authorizer.RuleResolver = (*RBACAuthorizer)(nil)

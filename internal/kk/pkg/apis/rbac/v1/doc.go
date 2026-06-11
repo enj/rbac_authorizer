@@ -21,7 +21,7 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: pkg/apis/rbac/v1/doc.go
-// Upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 package v1

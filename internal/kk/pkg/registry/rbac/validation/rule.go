@@ -17,9 +17,10 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: pkg/registry/rbac/validation/rule.go
-// Upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
+// Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
 package validation
 
 import (
@@ -33,10 +34,9 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apiserver/pkg/authentication/serviceaccount"
-	"k8s.io/apiserver/pkg/authentication/user"
-	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
-	"k8s.io/component-helpers/auth/rbac/validation"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/serviceaccount"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user"
+	"monis.app/kk/rbac_authorizer/internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation"
 	rbacv1helpers "monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1"
 )
 
@@ -56,15 +56,10 @@ type AuthorizationRuleResolver interface {
 }
 
 // ConfirmNoEscalation determines if the roles for a given user in a given namespace encompass the provided role.
-func ConfirmNoEscalation(ctx context.Context, ruleResolver AuthorizationRuleResolver, rules []rbacv1.PolicyRule) error {
+func ConfirmNoEscalation(ctx context.Context, ruleResolver AuthorizationRuleResolver, rules []rbacv1.PolicyRule, user user.Info, namespace string) error {
 	ruleResolutionErrors := []error{}
 
-	user, ok := genericapirequest.UserFrom(ctx)
-	if !ok {
-		return fmt.Errorf("no user on context")
-	}
-	namespace, _ := genericapirequest.NamespaceFrom(ctx)
-
+	
 	ownerRules, err := ruleResolver.RulesFor(ctx, user, namespace)
 	if err != nil {
 		// As per AuthorizationRuleResolver contract, this may return a non fatal error with an incomplete list of policies. Log the error and continue.

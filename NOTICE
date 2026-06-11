@@ -12,8 +12,8 @@ affiliated with the Kubernetes project.
 
   upstream module: k8s.io/kubernetes
   upstream repository: https://github.com/kubernetes/kubernetes.git
-  upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
-  upstream release: v1.36.1
+  upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+  upstream release: v1.36.2
   generated module: monis.app/kk/rbac_authorizer
   generated repository: https://github.com/enj/rbac_authorizer.git
   relocated below: internal/kk
@@ -35,11 +35,19 @@ were not copied at all, and any patches listed below were applied before
 relocation.
 
   relocated packages:
+    internal/kk/compat/apiserver/authorizer  (from staging/src/k8s.io/apiserver/pkg/authorization/authorizer)
+    internal/kk/compat/apiserver/serviceaccount  (from staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount)
+    internal/kk/compat/apiserver/user  (from staging/src/k8s.io/apiserver/pkg/authentication/user)
     internal/kk/pkg/apis/rbac/v1  (from pkg/apis/rbac/v1)
     internal/kk/pkg/registry/rbac/validation  (from pkg/registry/rbac/validation)
     internal/kk/plugin/pkg/auth/authorizer/rbac  (from plugin/pkg/auth/authorizer/rbac)
+    internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation  (from auth/rbac/validation)
 
   changed files:
+    internal/kk/compat/apiserver/authorizer/interfaces.go
+    internal/kk/compat/apiserver/authorizer/rule.go
+    internal/kk/compat/apiserver/serviceaccount/util.go
+    internal/kk/compat/apiserver/user/user.go
     internal/kk/pkg/apis/rbac/v1/doc.go
     internal/kk/pkg/registry/rbac/validation/rule.go
     internal/kk/plugin/pkg/auth/authorizer/rbac/rbac.go
@@ -85,6 +93,14 @@ of the copied files would reveal them.
     a retained file still carries a generator directive naming the pruned package,
     so the directive is stripped and recorded in provenance. It is not reachable
     through the generated public API.
+  - Authorization, user, decision, and rule-info types are module-local and are not assignable to k8s.io/apiserver types.
+    cause: compatibility.apiserver: local
+    The local mode is an intentional public API break selected by the profile;
+    external mode preserves real apiserver identity.
+  - ConfirmNoEscalation receives explicit user and namespace arguments instead of reading private apiserver request-context keys.
+    cause: compatibility.apiserver: local
+    Private context key identity cannot be recreated safely outside
+    k8s.io/apiserver, so local mode makes the inputs explicit.
   - k8s.io/kubernetes/pkg/apis/rbac.AddToScheme no longer performs its schemeRegistration effect at import time.
     cause: type policy prune-internal for k8s.io/kubernetes/pkg/apis/rbac paired with k8s.io/api/rbac/v1
     the package registers its types into a scheme at import time, and pruning it
@@ -116,19 +132,24 @@ replaced by the published module version that corresponds to the upstream
 commit above.
 
   mapping:
-    staging/src/k8s.io/api -> k8s.io/api@v0.36.1
-    staging/src/k8s.io/apimachinery -> k8s.io/apimachinery@v0.36.1
-    staging/src/k8s.io/apiserver -> k8s.io/apiserver@v0.36.1
-    staging/src/k8s.io/client-go -> k8s.io/client-go@v0.36.1
-    staging/src/k8s.io/component-base -> k8s.io/component-base@v0.36.1
-    staging/src/k8s.io/component-helpers -> k8s.io/component-helpers@v0.36.1
+    staging/src/k8s.io/api -> k8s.io/api@v0.36.2
+    staging/src/k8s.io/apimachinery -> k8s.io/apimachinery@v0.36.2
+    staging/src/k8s.io/client-go -> k8s.io/client-go@v0.36.2
 
 Copied dependency packages
 --------------------------
 
-No dependency package was copied into this module. Every dependency is
-required as a published module, so its types keep the identity the rest of the
-ecosystem uses.
+These packages were copied into this module rather than required as published
+modules. Each is listed with the module it came from, the commit it was taken
+at, and the licence files copied with it.
+
+  - k8s.io/component-helpers/auth/rbac/validation
+    module: k8s.io/component-helpers@v0.36.2
+    upstream repository: https://github.com/kubernetes/component-helpers
+    upstream commit: d4b52afdf6f1f74272a04be7f4658c1e0dccb430
+    destination: internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation
+    licence: Apache-2.0
+    file: internal/kk/staging/src/k8s.io/component-helpers/LICENSE  (from LICENSE, sha256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30)
 
 Trademarks
 ----------

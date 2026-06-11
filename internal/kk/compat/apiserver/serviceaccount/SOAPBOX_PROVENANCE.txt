@@ -1,0 +1,17 @@
+soapbox package provenance
+package: internal/kk/compat/apiserver/serviceaccount
+upstream package: staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount
+upstream repository: https://github.com/kubernetes/kubernetes.git
+upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+
+files:
+  internal/kk/compat/apiserver/serviceaccount/util.go
+    upstream: staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount/util.go
+    generated: yes
+    1 compatibility staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount/util.go -> module-local compatibility declaration
+
+pruned:
+  (none)
+
+patches:
+  (none)

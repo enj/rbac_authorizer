@@ -2,7 +2,7 @@ soapbox package provenance
 package: internal/kk/pkg/registry/rbac/validation
 upstream package: pkg/registry/rbac/validation
 upstream repository: https://github.com/kubernetes/kubernetes.git
-upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
 
 files:
   internal/kk/pkg/registry/rbac/validation/policy_compact.go
@@ -11,7 +11,14 @@ files:
   internal/kk/pkg/registry/rbac/validation/rule.go
     upstream: pkg/registry/rbac/validation/rule.go
     17 notice + // This file was modified by soapbox and is not the upstream original. ...
+    23 notice + // Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
     34 import k8s.io/kubernetes/pkg/apis/rbac/v1 -> monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1
+    36 import k8s.io/apiserver/pkg/authentication/serviceaccount -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/serviceaccount
+    37 import k8s.io/apiserver/pkg/authentication/user -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user
+    38 compatibility - 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+    39 import k8s.io/component-helpers/auth/rbac/validation -> monis.app/kk/rbac_authorizer/internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation
+    59 compatibility func ConfirmNoEscalation(ctx context.Context, ruleResolver AuthorizationRuleResolver, rules []rbacv1.PolicyRule) error { -> func ConfirmNoEscalation(ctx context.Context, ruleResolver AuthorizationRuleResolver, rules []rbacv1.PolicyRule, user user.Info, namespace string) error {
+    60 compatibility user, ok := genericapirequest.UserFrom(ctx) ... -> explicit user and namespace arguments
 
 pruned:
   pkg/registry/rbac/validation/internal_version_adapter.go

@@ -17,10 +17,11 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: plugin/pkg/auth/authorizer/rbac/rbac.go
-// Upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 // Package rbac implements the authorizer.Authorizer interface using roles base access control.
+// Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
 package rbac
 
 import (
@@ -33,8 +34,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apiserver/pkg/authentication/user"
-	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/authorizer"
 	rbaclisters "k8s.io/client-go/listers/rbac/v1"
 	rbacv1helpers "monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1"
 	rbacregistryvalidation "monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation"

@@ -2,18 +2,24 @@ soapbox package provenance
 package: internal/kk/plugin/pkg/auth/authorizer/rbac
 upstream package: plugin/pkg/auth/authorizer/rbac
 upstream repository: https://github.com/kubernetes/kubernetes.git
-upstream commit: 756939600b9a7180fc2df6550a4585b638875e67
+upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
 
 files:
   internal/kk/plugin/pkg/auth/authorizer/rbac/rbac.go
     upstream: plugin/pkg/auth/authorizer/rbac/rbac.go
     17 notice + // This file was modified by soapbox and is not the upstream original. ...
+    24 notice + // Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
     33 import k8s.io/kubernetes/pkg/apis/rbac/v1 -> monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1
     34 import k8s.io/kubernetes/pkg/registry/rbac/validation -> monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation
+    36 import k8s.io/apiserver/pkg/authentication/user -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user
+    37 import k8s.io/apiserver/pkg/authorization/authorizer -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/authorizer
   internal/kk/plugin/pkg/auth/authorizer/rbac/subject_locator.go
     upstream: plugin/pkg/auth/authorizer/rbac/subject_locator.go
     17 notice + // This file was modified by soapbox and is not the upstream original. ...
+    24 notice + // Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
     27 import k8s.io/kubernetes/pkg/registry/rbac/validation -> monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation
+    31 import k8s.io/apiserver/pkg/authentication/user -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user
+    32 import k8s.io/apiserver/pkg/authorization/authorizer -> monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/authorizer
 
 pruned:
   (none)
