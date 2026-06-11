@@ -19,6 +19,11 @@
       "ref": "refs/tags/v1.36.1",
       "source": "756939600b9a7180fc2df6550a4585b638875e67",
       "destination": "4dd98edb6a37f4c1c600d67c7970b51fda13185d"
+    },
+    {
+      "ref": "refs/tags/v1.36.2",
+      "source": "24e2b02af5543d7910c2bb074c7264df5a8f0467",
+      "destination": "86903e18cc6110e58ba7ecf9dd53e506e6ddbc52"
     }
   ],
   "mapping": {
@@ -26,33 +31,30 @@
     "object": "a54477a4e82221ab502f3eb73d49869bae78be3b",
     "entries": 2
   },
-  "tracks": [
-    {
-      "name": "v0.36.2",
-      "ref": "refs/soapbox/progress/v0.36.2",
-      "source": "24e2b02af5543d7910c2bb074c7264df5a8f0467",
-      "destination": "86903e18cc6110e58ba7ecf9dd53e506e6ddbc52",
-      "done": 31,
-      "total": 31
-    }
-  ],
+  "tracks": [],
   "published": [
     {
       "ref": "refs/heads/main",
       "kind": "branch",
-      "object": "4dd98edb6a37f4c1c600d67c7970b51fda13185d",
-      "source": "756939600b9a7180fc2df6550a4585b638875e67"
+      "object": "86903e18cc6110e58ba7ecf9dd53e506e6ddbc52",
+      "source": "24e2b02af5543d7910c2bb074c7264df5a8f0467"
     },
     {
       "ref": "refs/tags/v0.36.1",
       "kind": "tag",
       "object": "73491fe638f492e32168032393c50591369dfc68",
       "source": "756939600b9a7180fc2df6550a4585b638875e67"
+    },
+    {
+      "ref": "refs/tags/v0.36.2",
+      "kind": "tag",
+      "object": "ea93e68d954fc389cc13f81e965bf5d4ccfee829",
+      "source": "24e2b02af5543d7910c2bb074c7264df5a8f0467"
     }
   ],
   "engine": {
     "version": "0.2.1",
     "toolchain": "go1.26.5"
   },
-  "digest": "sha256:bb0746c451960dbd5b289100bc2119bf3ff1d4dfb388df9dc36153f6c3f28f1e"
+  "digest": "sha256:8efc2700d588c76cf5fd8d7001f2b23e88b9b445ad358e3d6e041d2a30626da2"
 }
