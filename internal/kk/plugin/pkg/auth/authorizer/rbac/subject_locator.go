@@ -17,7 +17,7 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: plugin/pkg/auth/authorizer/rbac/subject_locator.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 // Package rbac implements the authorizer.Authorizer interface using roles base access control.
@@ -29,8 +29,8 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user"
 	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/authorizer"
+	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user"
 	rbacregistryvalidation "monis.app/kk/rbac_authorizer/internal/kk/pkg/registry/rbac/validation"
 )
 

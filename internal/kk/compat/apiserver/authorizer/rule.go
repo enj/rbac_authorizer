@@ -18,7 +18,7 @@ limitations under the License.
 // This module-local compatibility declaration is intentionally not type-compatible with k8s.io/apiserver.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: staging/src/k8s.io/apiserver/pkg/authorization/authorizer/rule.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 
 package authorizer
 
@@ -32,15 +32,15 @@ type ResourceRuleInfo interface {
 
 // DefaultResourceRuleInfo is the module-local resource rule record.
 type DefaultResourceRuleInfo struct {
-	Verbs []string
-	APIGroups []string
-	Resources []string
+	Verbs         []string
+	APIGroups     []string
+	Resources     []string
 	ResourceNames []string
 }
 
-func (i *DefaultResourceRuleInfo) GetVerbs() []string { return i.Verbs }
-func (i *DefaultResourceRuleInfo) GetAPIGroups() []string { return i.APIGroups }
-func (i *DefaultResourceRuleInfo) GetResources() []string { return i.Resources }
+func (i *DefaultResourceRuleInfo) GetVerbs() []string         { return i.Verbs }
+func (i *DefaultResourceRuleInfo) GetAPIGroups() []string     { return i.APIGroups }
+func (i *DefaultResourceRuleInfo) GetResources() []string     { return i.Resources }
 func (i *DefaultResourceRuleInfo) GetResourceNames() []string { return i.ResourceNames }
 
 // NonResourceRuleInfo describes allowed non-resource operations.
@@ -51,9 +51,9 @@ type NonResourceRuleInfo interface {
 
 // DefaultNonResourceRuleInfo is the module-local non-resource rule record.
 type DefaultNonResourceRuleInfo struct {
-	Verbs []string
+	Verbs           []string
 	NonResourceURLs []string
 }
 
-func (i *DefaultNonResourceRuleInfo) GetVerbs() []string { return i.Verbs }
+func (i *DefaultNonResourceRuleInfo) GetVerbs() []string           { return i.Verbs }
 func (i *DefaultNonResourceRuleInfo) GetNonResourceURLs() []string { return i.NonResourceURLs }

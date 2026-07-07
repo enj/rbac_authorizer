@@ -18,7 +18,7 @@ limitations under the License.
 // This module-local compatibility declaration is intentionally not type-compatible with k8s.io/apiserver.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: staging/src/k8s.io/apiserver/pkg/authentication/user/user.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 
 package user
 
@@ -32,15 +32,15 @@ type Info interface {
 
 // DefaultInfo is the module-local user information record.
 type DefaultInfo struct {
-	Name string
-	UID string
+	Name   string
+	UID    string
 	Groups []string
-	Extra map[string][]string
+	Extra  map[string][]string
 }
 
-func (i *DefaultInfo) GetName() string { return i.Name }
-func (i *DefaultInfo) GetUID() string { return i.UID }
-func (i *DefaultInfo) GetGroups() []string { return i.Groups }
+func (i *DefaultInfo) GetName() string               { return i.Name }
+func (i *DefaultInfo) GetUID() string                { return i.UID }
+func (i *DefaultInfo) GetGroups() []string           { return i.Groups }
 func (i *DefaultInfo) GetExtra() map[string][]string { return i.Extra }
 
 const SystemPrivilegedGroup = "system:masters"

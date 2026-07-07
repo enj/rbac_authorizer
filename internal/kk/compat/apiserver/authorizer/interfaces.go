@@ -18,7 +18,7 @@ limitations under the License.
 // This module-local compatibility declaration is intentionally not type-compatible with k8s.io/apiserver.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: staging/src/k8s.io/apiserver/pkg/authorization/authorizer/interfaces.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 
 package authorizer
 
@@ -44,27 +44,27 @@ type Attributes interface {
 
 // AttributesRecord is a directly constructible module-local request record.
 type AttributesRecord struct {
-	User user.Info
-	Verb string
-	Namespace string
-	APIGroup string
-	APIVersion string
-	Resource string
-	Subresource string
-	Name string
+	User            user.Info
+	Verb            string
+	Namespace       string
+	APIGroup        string
+	APIVersion      string
+	Resource        string
+	Subresource     string
+	Name            string
 	ResourceRequest bool
-	Path string
+	Path            string
 }
 
-func (a AttributesRecord) GetUser() user.Info { return a.User }
-func (a AttributesRecord) GetVerb() string { return a.Verb }
-func (a AttributesRecord) GetNamespace() string { return a.Namespace }
-func (a AttributesRecord) GetResource() string { return a.Resource }
-func (a AttributesRecord) GetSubresource() string { return a.Subresource }
-func (a AttributesRecord) GetName() string { return a.Name }
-func (a AttributesRecord) GetAPIGroup() string { return a.APIGroup }
+func (a AttributesRecord) GetUser() user.Info      { return a.User }
+func (a AttributesRecord) GetVerb() string         { return a.Verb }
+func (a AttributesRecord) GetNamespace() string    { return a.Namespace }
+func (a AttributesRecord) GetResource() string     { return a.Resource }
+func (a AttributesRecord) GetSubresource() string  { return a.Subresource }
+func (a AttributesRecord) GetName() string         { return a.Name }
+func (a AttributesRecord) GetAPIGroup() string     { return a.APIGroup }
 func (a AttributesRecord) IsResourceRequest() bool { return a.ResourceRequest }
-func (a AttributesRecord) GetPath() string { return a.Path }
+func (a AttributesRecord) GetPath() string         { return a.Path }
 
 // Decision is a module-local authorization verdict.
 type Decision int

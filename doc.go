@@ -4,7 +4,7 @@
 // independently consumable Go module.
 //
 // The code behind this package is copied from k8s.io/kubernetes at commit
-// 24e2b02af5543d7910c2bb074c7264df5a8f0467 and modified. This module is not
+// f01529250b2477e4ff34c5bbd020c379b49669e6 and modified. This module is not
 // a Kubernetes release and is not endorsed by or affiliated with that
 // project. See the NOTICE file for the full attribution and the record of
 // what was changed.

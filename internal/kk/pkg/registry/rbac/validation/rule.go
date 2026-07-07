@@ -17,7 +17,7 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: pkg/registry/rbac/validation/rule.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 // Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.
@@ -36,8 +36,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/serviceaccount"
 	"monis.app/kk/rbac_authorizer/internal/kk/compat/apiserver/user"
-	"monis.app/kk/rbac_authorizer/internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation"
 	rbacv1helpers "monis.app/kk/rbac_authorizer/internal/kk/pkg/apis/rbac/v1"
+	"monis.app/kk/rbac_authorizer/internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation"
 )
 
 type AuthorizationRuleResolver interface {
@@ -59,7 +59,6 @@ type AuthorizationRuleResolver interface {
 func ConfirmNoEscalation(ctx context.Context, ruleResolver AuthorizationRuleResolver, rules []rbacv1.PolicyRule, user user.Info, namespace string) error {
 	ruleResolutionErrors := []error{}
 
-	
 	ownerRules, err := ruleResolver.RulesFor(ctx, user, namespace)
 	if err != nil {
 		// As per AuthorizationRuleResolver contract, this may return a non fatal error with an incomplete list of policies. Log the error and continue.

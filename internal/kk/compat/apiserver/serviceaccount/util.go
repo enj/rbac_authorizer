@@ -18,14 +18,14 @@ limitations under the License.
 // This module-local compatibility declaration is intentionally not type-compatible with k8s.io/apiserver.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount/util.go
-// Upstream commit: 24e2b02af5543d7910c2bb074c7264df5a8f0467
+// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
 
 package serviceaccount
 
 import "strings"
 
 const (
-	ServiceAccountUsernamePrefix = "system:serviceaccount:"
+	ServiceAccountUsernamePrefix    = "system:serviceaccount:"
 	ServiceAccountUsernameSeparator = ":"
 )
 
