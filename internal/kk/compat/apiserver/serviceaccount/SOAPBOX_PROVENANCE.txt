@@ -2,7 +2,7 @@ soapbox package provenance
 package: internal/kk/compat/apiserver/serviceaccount
 upstream package: staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount
 upstream repository: https://github.com/kubernetes/kubernetes.git
-upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
+upstream commit: 9419ebed1fb4631efde758bd8395a33b2bf74ba7
 
 files:
   internal/kk/compat/apiserver/serviceaccount/util.go

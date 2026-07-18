@@ -19,7 +19,7 @@ licence, and trademark statement, and for the record of what was changed.
 | --- | --- |
 | upstream module | `k8s.io/kubernetes` |
 | upstream repository | `https://github.com/kubernetes/kubernetes.git` |
-| upstream commit | `f01529250b2477e4ff34c5bbd020c379b49669e6` |
+| upstream commit | `9419ebed1fb4631efde758bd8395a33b2bf74ba7` |
 | relocated below | `internal/kk` |
 
 ## Public API

@@ -17,7 +17,7 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: plugin/pkg/auth/authorizer/rbac/rbac.go
-// Upstream commit: f01529250b2477e4ff34c5bbd020c379b49669e6
+// Upstream commit: 9419ebed1fb4631efde758bd8395a33b2bf74ba7
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 // Package rbac implements the authorizer.Authorizer interface using roles base access control.
