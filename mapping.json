@@ -2,6 +2,167 @@
   "schema": 1,
   "entries": [
     {
+      "source": "0f29094e5b73085e3802ecc1298ecae13866bfe6",
+      "tag": "v1.36.3",
+      "modules": [
+        {
+          "path": "k8s.io/api",
+          "version": "v0.36.3",
+          "commit": "3fde3c43c3cf3447606b9c2ac2c6257095444387"
+        },
+        {
+          "path": "k8s.io/apiextensions-apiserver",
+          "version": "v0.36.3",
+          "commit": "2e78d6fca8b214fd93118268eb9d36255d79738f"
+        },
+        {
+          "path": "k8s.io/apimachinery",
+          "version": "v0.36.3",
+          "commit": "40bf4b2b62f8838b9b37de7b407793f1f17ee225"
+        },
+        {
+          "path": "k8s.io/apiserver",
+          "version": "v0.36.3",
+          "commit": "72f5171bff564be05f1011ccef0233a2ea76ebb4"
+        },
+        {
+          "path": "k8s.io/cli-runtime",
+          "version": "v0.36.3",
+          "commit": "a39fac45a4c7fa6776d17e9ae18f79cb99a77d3b"
+        },
+        {
+          "path": "k8s.io/client-go",
+          "version": "v0.36.3",
+          "commit": "44a8af2fee834a8fc3523360e029cf7ea7104622"
+        },
+        {
+          "path": "k8s.io/cloud-provider",
+          "version": "v0.36.3",
+          "commit": "a561a245926d5cecf135a51b5a7da30996c5f4c5"
+        },
+        {
+          "path": "k8s.io/cluster-bootstrap",
+          "version": "v0.36.3",
+          "commit": "b681a367a1d3c39b2876bdbc3a9b7cf89a2247d7"
+        },
+        {
+          "path": "k8s.io/code-generator",
+          "version": "v0.36.3",
+          "commit": "f4c4331b25bb4edea0da0b927bb013a4149ffbfd"
+        },
+        {
+          "path": "k8s.io/component-base",
+          "version": "v0.36.3",
+          "commit": "ccf6f38e848ab4b98e1ed1f27b183b8e24212444"
+        },
+        {
+          "path": "k8s.io/component-helpers",
+          "version": "v0.36.3",
+          "commit": "8c03f98ede662ab6b26d3fee7cfc21df44b24e0e"
+        },
+        {
+          "path": "k8s.io/controller-manager",
+          "version": "v0.36.3",
+          "commit": "93e41734741054f34abe40a2544271d605d17b57"
+        },
+        {
+          "path": "k8s.io/cri-api",
+          "version": "v0.36.3",
+          "commit": "1733b6a9fa123c5887eefa14523c532b12827f73"
+        },
+        {
+          "path": "k8s.io/cri-client",
+          "version": "v0.36.3",
+          "commit": "60f122151190bce5f01155b1f1ebad0f055aebc2"
+        },
+        {
+          "path": "k8s.io/cri-streaming",
+          "version": "v0.36.3",
+          "commit": "2753ec0ae67420b71839d9d426e021c27b702f80"
+        },
+        {
+          "path": "k8s.io/csi-translation-lib",
+          "version": "v0.36.3",
+          "commit": "7609781f6052fc52f6a74a936a31680e0845ecce"
+        },
+        {
+          "path": "k8s.io/dynamic-resource-allocation",
+          "version": "v0.36.3",
+          "commit": "6dc5a00bfc84d030434a0fd8120e631edb3a27b7"
+        },
+        {
+          "path": "k8s.io/endpointslice",
+          "version": "v0.36.3",
+          "commit": "810be24c14536c3df13c9748f6990cb48707196f"
+        },
+        {
+          "path": "k8s.io/externaljwt",
+          "version": "v0.36.3",
+          "commit": "3483380ee5ae5868323794e7092a3d1b6bf748ee"
+        },
+        {
+          "path": "k8s.io/kms",
+          "version": "v0.36.3",
+          "commit": "ff742cb198e20300b6fd45c5a1a0398e700d717d"
+        },
+        {
+          "path": "k8s.io/kube-aggregator",
+          "version": "v0.36.3",
+          "commit": "08f94978953a306521ade2a4321550700017d330"
+        },
+        {
+          "path": "k8s.io/kube-controller-manager",
+          "version": "v0.36.3",
+          "commit": "94100c35386a71f127d34365701e574fd908a962"
+        },
+        {
+          "path": "k8s.io/kube-proxy",
+          "version": "v0.36.3",
+          "commit": "5bfb40fe3b1310c89117147b4f0a2ac163187757"
+        },
+        {
+          "path": "k8s.io/kube-scheduler",
+          "version": "v0.36.3",
+          "commit": "b38e356654c4ff006c3dee156acb29b4d3eb023d"
+        },
+        {
+          "path": "k8s.io/kubectl",
+          "version": "v0.36.3",
+          "commit": "73fdc7a337b55d4097e8723cb44d09ac7473e1d4"
+        },
+        {
+          "path": "k8s.io/kubelet",
+          "version": "v0.36.3",
+          "commit": "bbb4f8f0907ace5f317f33e06413a55a5f4636f6"
+        },
+        {
+          "path": "k8s.io/metrics",
+          "version": "v0.36.3",
+          "commit": "f1e88ffc29023680a42b93dc3213dcdab922f0f1"
+        },
+        {
+          "path": "k8s.io/mount-utils",
+          "version": "v0.36.3",
+          "commit": "2f116ccea98ebd0e2f68d625935c60d393e9b46d"
+        },
+        {
+          "path": "k8s.io/pod-security-admission",
+          "version": "v0.36.3",
+          "commit": "be7583bb83be895b7d4f4dfc02b64457579ea0ac"
+        },
+        {
+          "path": "k8s.io/sample-apiserver",
+          "version": "v0.36.3",
+          "commit": "d2b1484f1f601b32bd0f810664bc980aea8592d9"
+        },
+        {
+          "path": "k8s.io/streaming",
+          "version": "v0.36.3",
+          "commit": "fbcf184e52bfd8a40d46311b494493c287fd6d05"
+        }
+      ]
+    },
+    {
       "source": "24e2b02af5543d7910c2bb074c7264df5a8f0467",
       "tag": "v1.36.2",
       "modules": [
@@ -319,6 +480,326 @@
         {
           "path": "k8s.io/streaming",
           "version": "v0.36.1",
+          "commit": "fbcf184e52bfd8a40d46311b494493c287fd6d05"
+        }
+      ]
+    },
+    {
+      "source": "9419ebed1fb4631efde758bd8395a33b2bf74ba7",
+      "modules": [
+        {
+          "path": "k8s.io/api",
+          "version": "v0.0.0-20260718023008-53c47b96517d",
+          "commit": "53c47b96517d80155e5eed46a2c667cb68f38e9c"
+        },
+        {
+          "path": "k8s.io/apiextensions-apiserver",
+          "version": "v0.0.0-20260718052547-4b2f00787e95",
+          "commit": "4b2f00787e956cd8768175309e81d5f6b0600958"
+        },
+        {
+          "path": "k8s.io/apimachinery",
+          "version": "v0.36.0-alpha.2.0.20260718021051-34d46be4f2cb",
+          "commit": "34d46be4f2cba34b54c9eca942ff078fabbe35dd"
+        },
+        {
+          "path": "k8s.io/apiserver",
+          "version": "v0.0.0-20260718042444-8f96c5224493",
+          "commit": "8f96c522449373766a41e2bf22e5504f8cf6d797"
+        },
+        {
+          "path": "k8s.io/cli-runtime",
+          "version": "v0.0.0-20260718054408-88a785e6f1aa",
+          "commit": "88a785e6f1aa55e696ca938786c614a752df90b8"
+        },
+        {
+          "path": "k8s.io/client-go",
+          "version": "v0.0.0-20260718025631-f501ada2efb7",
+          "commit": "f501ada2efb78c4685f993249b076570db6db84f"
+        },
+        {
+          "path": "k8s.io/cloud-provider",
+          "version": "v0.0.0-20260718064541-e769ae319ee7",
+          "commit": "e769ae319ee70702332759ea3331bde3ca9f5b83"
+        },
+        {
+          "path": "k8s.io/cluster-bootstrap",
+          "version": "v0.0.0-20260718070154-2a911b3ad5ab",
+          "commit": "2a911b3ad5abd6643a453fbc8edffcd6ecf484e6"
+        },
+        {
+          "path": "k8s.io/code-generator",
+          "version": "v0.30.0-alpha.3.0.20260718031909-f2be266729d1",
+          "commit": "f2be266729d1fe6db450e25bbb89bddc25dfb2da"
+        },
+        {
+          "path": "k8s.io/component-base",
+          "version": "v0.0.0-20260718033048-ab4db9b0a7e3",
+          "commit": "ab4db9b0a7e3322c8cbe3075bcff6240b321d438"
+        },
+        {
+          "path": "k8s.io/component-helpers",
+          "version": "v0.20.0-alpha.2.0.20260718033828-30d6dda89a43",
+          "commit": "30d6dda89a433919aea34553cb5c5083a5ca5f7a"
+        },
+        {
+          "path": "k8s.io/controller-manager",
+          "version": "v0.20.0-alpha.1.0.20260718063520-f356c2c0474d",
+          "commit": "f356c2c0474dce4674bb88bb74bd527d7ac3e735"
+        },
+        {
+          "path": "k8s.io/cri-api",
+          "version": "v0.36.3",
+          "commit": "1733b6a9fa123c5887eefa14523c532b12827f73"
+        },
+        {
+          "path": "k8s.io/cri-client",
+          "version": "v0.31.0-alpha.0.0.20260718061426-1e059bda08db",
+          "commit": "1e059bda08db0665458ede502bbb86a26be341dc"
+        },
+        {
+          "path": "k8s.io/cri-streaming",
+          "version": "v0.36.2",
+          "commit": "d4fe91fbfccfeb9dd5720f171eb820591f1ac2ad"
+        },
+        {
+          "path": "k8s.io/csi-translation-lib",
+          "version": "v0.0.0-20260718071025-7b44ffef7492",
+          "commit": "7b44ffef74929700ef98da03d265665a77430745"
+        },
+        {
+          "path": "k8s.io/dynamic-resource-allocation",
+          "version": "v0.26.0-beta.0.0.20260718075321-b64f68cdab83",
+          "commit": "b64f68cdab83b644bd22d2a29ad493786f5e11b4"
+        },
+        {
+          "path": "k8s.io/endpointslice",
+          "version": "v0.28.0-alpha.4.0.20260718080845-17f7b9b8a1b4",
+          "commit": "17f7b9b8a1b4263d0b9c6a8cf3c7b0acb209dbbc"
+        },
+        {
+          "path": "k8s.io/externaljwt",
+          "version": "v0.36.2",
+          "commit": "3483380ee5ae5868323794e7092a3d1b6bf748ee"
+        },
+        {
+          "path": "k8s.io/kms",
+          "version": "v0.36.2",
+          "commit": "d97516ac57a93f08506f7684866cba5769151135"
+        },
+        {
+          "path": "k8s.io/kube-aggregator",
+          "version": "v0.0.0-20260718043821-6428248998d3",
+          "commit": "6428248998d3d117fdfdb5b81ab4809c71766cb5"
+        },
+        {
+          "path": "k8s.io/kube-controller-manager",
+          "version": "v0.0.0-20260718065411-f9fe4d62bc5d",
+          "commit": "f9fe4d62bc5d9b64dfdc78a8b6b0d698cad47171"
+        },
+        {
+          "path": "k8s.io/kube-proxy",
+          "version": "v0.0.0-20260718060028-76267a869d18",
+          "commit": "76267a869d183acb47c0ee53c19b277007858142"
+        },
+        {
+          "path": "k8s.io/kube-scheduler",
+          "version": "v0.0.0-20260718080153-a2b3269a07b1",
+          "commit": "a2b3269a07b1a6ba7ab00688def6cd7922061adc"
+        },
+        {
+          "path": "k8s.io/kubectl",
+          "version": "v0.0.0-20260718073527-58802aedc0a0",
+          "commit": "58802aedc0a020ff01cfc54a1166017d9d816f87"
+        },
+        {
+          "path": "k8s.io/kubelet",
+          "version": "v0.0.0-20260718062647-cfd73d47e972",
+          "commit": "cfd73d47e972d07fdd34c4de2ec1e58329ee364e"
+        },
+        {
+          "path": "k8s.io/metrics",
+          "version": "v0.0.0-20260718053457-109dd7af0c20",
+          "commit": "109dd7af0c207b560c91af195cdfd1a330d7a228"
+        },
+        {
+          "path": "k8s.io/mount-utils",
+          "version": "v0.36.2",
+          "commit": "2f116ccea98ebd0e2f68d625935c60d393e9b46d"
+        },
+        {
+          "path": "k8s.io/pod-security-admission",
+          "version": "v0.22.0-beta.0.0.20260718074504-77a614e69faf",
+          "commit": "77a614e69fafd7dc2a8e53c9aee862169cbda2cf"
+        },
+        {
+          "path": "k8s.io/sample-apiserver",
+          "version": "v0.0.0-20260718045003-7da11fa19a82",
+          "commit": "7da11fa19a828ed22b40e04ea9e3f7f5e177ea65"
+        },
+        {
+          "path": "k8s.io/streaming",
+          "version": "v0.36.2",
+          "commit": "fbcf184e52bfd8a40d46311b494493c287fd6d05"
+        }
+      ]
+    },
+    {
+      "source": "f01529250b2477e4ff34c5bbd020c379b49669e6",
+      "modules": [
+        {
+          "path": "k8s.io/api",
+          "version": "v0.36.2",
+          "commit": "2f4cefdbec4e3c3cd76d15844e90c679419f4dc7"
+        },
+        {
+          "path": "k8s.io/apiextensions-apiserver",
+          "version": "v0.36.2",
+          "commit": "e4eb159421d265e49845a45cea25d6d559f4d08b"
+        },
+        {
+          "path": "k8s.io/apimachinery",
+          "version": "v0.36.2",
+          "commit": "ae3f98eb01e4bebb7d90db742081949c5c4b1ef7"
+        },
+        {
+          "path": "k8s.io/apiserver",
+          "version": "v0.36.2",
+          "commit": "6d475042ddad61af63935dccaaed777d1d54e261"
+        },
+        {
+          "path": "k8s.io/cli-runtime",
+          "version": "v0.36.2",
+          "commit": "c97bc2fe537b7780b37b8390a6b1e767b046f695"
+        },
+        {
+          "path": "k8s.io/client-go",
+          "version": "v0.36.2",
+          "commit": "877f5359348b5df85619f2aa379abc5bd74bca2d"
+        },
+        {
+          "path": "k8s.io/cloud-provider",
+          "version": "v0.36.2",
+          "commit": "a120f790c02c159522bdc5f0cd3de86ee090f09d"
+        },
+        {
+          "path": "k8s.io/cluster-bootstrap",
+          "version": "v0.36.2",
+          "commit": "32a539b3690fcdd5356160dcf2983c48bcf2e2cf"
+        },
+        {
+          "path": "k8s.io/code-generator",
+          "version": "v0.30.0-alpha.3.0.20260707230046-415a84da9f1b",
+          "commit": "415a84da9f1bab07828e34659a81cd43ef31601a"
+        },
+        {
+          "path": "k8s.io/component-base",
+          "version": "v0.36.2",
+          "commit": "3393ee8a38a0f650040173a5b3ac4af2ee9d2308"
+        },
+        {
+          "path": "k8s.io/component-helpers",
+          "version": "v0.36.2",
+          "commit": "d4b52afdf6f1f74272a04be7f4658c1e0dccb430"
+        },
+        {
+          "path": "k8s.io/controller-manager",
+          "version": "v0.36.2",
+          "commit": "eefd579869e7407426691d0c3b423b751fc833ee"
+        },
+        {
+          "path": "k8s.io/cri-api",
+          "version": "v0.36.3",
+          "commit": "1733b6a9fa123c5887eefa14523c532b12827f73"
+        },
+        {
+          "path": "k8s.io/cri-client",
+          "version": "v0.36.2",
+          "commit": "688b4e7ecc3ea3e8b8838877420fb67c2f70faf6"
+        },
+        {
+          "path": "k8s.io/cri-streaming",
+          "version": "v0.36.2",
+          "commit": "d4fe91fbfccfeb9dd5720f171eb820591f1ac2ad"
+        },
+        {
+          "path": "k8s.io/csi-translation-lib",
+          "version": "v0.36.2",
+          "commit": "4d093957794666a4f1dc3cb3fbab9c409211a3ab"
+        },
+        {
+          "path": "k8s.io/dynamic-resource-allocation",
+          "version": "v0.26.0-beta.0.0.20260707230046-dda2e03f7317",
+          "commit": "dda2e03f731731d91a6b5453f0780fd0a2768545"
+        },
+        {
+          "path": "k8s.io/endpointslice",
+          "version": "v0.36.2",
+          "commit": "2c30b1861a20bba1ed456d52fce44bc6ba98198e"
+        },
+        {
+          "path": "k8s.io/externaljwt",
+          "version": "v0.36.2",
+          "commit": "3483380ee5ae5868323794e7092a3d1b6bf748ee"
+        },
+        {
+          "path": "k8s.io/kms",
+          "version": "v0.36.2",
+          "commit": "d97516ac57a93f08506f7684866cba5769151135"
+        },
+        {
+          "path": "k8s.io/kube-aggregator",
+          "version": "v0.36.2",
+          "commit": "af2b349648d5bbb78b2d42ec95a6b19ae4231401"
+        },
+        {
+          "path": "k8s.io/kube-controller-manager",
+          "version": "v0.36.2",
+          "commit": "53324190f53ba3180e0ae28b5ebd0c3ab3251909"
+        },
+        {
+          "path": "k8s.io/kube-proxy",
+          "version": "v0.36.2",
+          "commit": "1573df486730bdc7d5e77559911ddb2b395ac030"
+        },
+        {
+          "path": "k8s.io/kube-scheduler",
+          "version": "v0.36.2",
+          "commit": "df19e34eb6d43e1b59bec924b706cc3dc061b270"
+        },
+        {
+          "path": "k8s.io/kubectl",
+          "version": "v0.36.2",
+          "commit": "7f7757ab161bd61696d81c3a7d06db1d854f8ba5"
+        },
+        {
+          "path": "k8s.io/kubelet",
+          "version": "v0.36.2",
+          "commit": "b704cdefa5055b39180784e1ee865275f651aafd"
+        },
+        {
+          "path": "k8s.io/metrics",
+          "version": "v0.36.2",
+          "commit": "3bd6634ce82e07034fa4b51c3a7b17e242bc07a8"
+        },
+        {
+          "path": "k8s.io/mount-utils",
+          "version": "v0.36.2",
+          "commit": "2f116ccea98ebd0e2f68d625935c60d393e9b46d"
+        },
+        {
+          "path": "k8s.io/pod-security-admission",
+          "version": "v0.36.2",
+          "commit": "39b45cd167e1bd665aaeefc6e1acc1cc753259f2"
+        },
+        {
+          "path": "k8s.io/sample-apiserver",
+          "version": "v0.36.2",
+          "commit": "f0750f07bb914c337b309a60d6f8a8a283ec98fb"
+        },
+        {
+          "path": "k8s.io/streaming",
+          "version": "v0.36.2",
           "commit": "fbcf184e52bfd8a40d46311b494493c287fd6d05"
         }
       ]

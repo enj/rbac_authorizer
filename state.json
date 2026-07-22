@@ -10,9 +10,9 @@
     "ref": "refs/tags/v1.36.1"
   },
   "epoch": {
-    "profile": "sha256:95fcf54de8e08a5d33a0f94402c6667924f01fe9c3ce3bd1a0888e8d130a4a4d",
-    "source": "102c4a4f87ba0a26c4a4f1dd8d1d3d07c83697e5",
-    "destination": "23118131a2be063b2c081900d7258df189b6f3b1"
+    "profile": "sha256:4504241a1d548dbf98a989b848e45e6f72c18fc78d1870d4ca5d39296461bdaf",
+    "source": "903e7fc93bf47151cf6d978fe0b422be44acb6e0",
+    "destination": "2cf05b24cf2e487f523a14cb6d8dcd4c85e2c62a"
   },
   "cursors": [
     {
@@ -27,11 +27,20 @@
     }
   ],
   "mapping": {
-    "digest": "sha256:a59c7d7064b12b5b42188670d3d75ae034fd349b3ed1ef763ce59c8f0a650d5b",
-    "object": "a54477a4e82221ab502f3eb73d49869bae78be3b",
-    "entries": 2
+    "digest": "sha256:da80ac093e7dc558ed50df99e4ae82411405b27c143c06d1344199eaf2bc06cd",
+    "object": "8aaab4797c6f31483bb21c2a727dae0723a61b3b",
+    "entries": 5
   },
-  "tracks": [],
+  "tracks": [
+    {
+      "name": "v0.36.3",
+      "ref": "refs/soapbox/progress/v0.36.3",
+      "source": "0f29094e5b73085e3802ecc1298ecae13866bfe6",
+      "destination": "19a8b97a7497842f375eccf255eb1d8f18f682f4",
+      "done": 31,
+      "total": 31
+    }
+  ],
   "published": [
     {
       "ref": "refs/heads/main",
@@ -53,8 +62,8 @@
     }
   ],
   "engine": {
-    "version": "0.2.1",
+    "version": "0.2.2",
     "toolchain": "go1.26.5"
   },
-  "digest": "sha256:8efc2700d588c76cf5fd8d7001f2b23e88b9b445ad358e3d6e041d2a30626da2"
+  "digest": "sha256:dab072a53f029d1c15da5aad2da361155701e83c77f9d7e01627c29f89da9161"
 }
