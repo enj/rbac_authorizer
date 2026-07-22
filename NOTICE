@@ -12,7 +12,8 @@ affiliated with the Kubernetes project.
 
   upstream module: k8s.io/kubernetes
   upstream repository: https://github.com/kubernetes/kubernetes.git
-  upstream commit: 9419ebed1fb4631efde758bd8395a33b2bf74ba7
+  upstream commit: 0f29094e5b73085e3802ecc1298ecae13866bfe6
+  upstream release: v1.36.3
   generated module: monis.app/kk/rbac_authorizer
   generated repository: https://github.com/enj/rbac_authorizer.git
   relocated below: internal/kk
@@ -131,9 +132,9 @@ replaced by the published module version that corresponds to the upstream
 commit above.
 
   mapping:
-    staging/src/k8s.io/api -> k8s.io/api@v0.0.0-20260718023008-53c47b96517d
-    staging/src/k8s.io/apimachinery -> k8s.io/apimachinery@v0.36.0-alpha.2.0.20260718021051-34d46be4f2cb
-    staging/src/k8s.io/client-go -> k8s.io/client-go@v0.0.0-20260718025631-f501ada2efb7
+    staging/src/k8s.io/api -> k8s.io/api@v0.36.3
+    staging/src/k8s.io/apimachinery -> k8s.io/apimachinery@v0.36.3
+    staging/src/k8s.io/client-go -> k8s.io/client-go@v0.36.3
 
 Copied dependency packages
 --------------------------
@@ -143,9 +144,9 @@ modules. Each is listed with the module it came from, the commit it was taken
 at, and the licence files copied with it.
 
   - k8s.io/component-helpers/auth/rbac/validation
-    module: k8s.io/component-helpers@v0.20.0-alpha.2.0.20260718033828-30d6dda89a43
+    module: k8s.io/component-helpers@v0.36.3
     upstream repository: https://github.com/kubernetes/component-helpers
-    upstream commit: 30d6dda89a433919aea34553cb5c5083a5ca5f7a
+    upstream commit: 8c03f98ede662ab6b26d3fee7cfc21df44b24e0e
     destination: internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation
     licence: Apache-2.0
     file: internal/kk/staging/src/k8s.io/component-helpers/LICENSE  (from LICENSE, sha256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30)

@@ -7,9 +7,9 @@ toolchain go1.26.5
 godebug default=go1.26
 
 require (
-	k8s.io/api v0.0.0-20260718023008-53c47b96517d
-	k8s.io/apimachinery v0.36.0-alpha.2.0.20260718021051-34d46be4f2cb
-	k8s.io/client-go v0.0.0-20260718025631-f501ada2efb7
+	k8s.io/api v0.36.3
+	k8s.io/apimachinery v0.36.3
+	k8s.io/client-go v0.36.3
 	k8s.io/klog/v2 v2.140.0
 )
 

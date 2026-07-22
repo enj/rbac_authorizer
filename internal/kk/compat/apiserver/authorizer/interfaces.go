@@ -18,7 +18,7 @@ limitations under the License.
 // This module-local compatibility declaration is intentionally not type-compatible with k8s.io/apiserver.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: staging/src/k8s.io/apiserver/pkg/authorization/authorizer/interfaces.go
-// Upstream commit: 9419ebed1fb4631efde758bd8395a33b2bf74ba7
+// Upstream commit: 0f29094e5b73085e3802ecc1298ecae13866bfe6
 
 package authorizer
 

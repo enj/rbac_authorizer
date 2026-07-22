@@ -17,7 +17,7 @@ limitations under the License.
 // This file was modified by soapbox and is not the upstream original.
 // Upstream repository: https://github.com/kubernetes/kubernetes.git
 // Upstream path: pkg/registry/rbac/validation/rule.go
-// Upstream commit: 9419ebed1fb4631efde758bd8395a33b2bf74ba7
+// Upstream commit: 0f29094e5b73085e3802ecc1298ecae13866bfe6
 // Imports under k8s.io/kubernetes were rewritten to monis.app/kk/rbac_authorizer/internal/kk.
 
 // Soapbox local apiserver compatibility replaces upstream authorization types with module-local declarations; this mode is intentionally not API-compatible with k8s.io/apiserver.

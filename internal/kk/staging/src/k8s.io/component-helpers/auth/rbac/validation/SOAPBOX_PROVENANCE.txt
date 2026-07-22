@@ -2,7 +2,7 @@ soapbox package provenance
 package: internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation
 upstream package: auth/rbac/validation
 upstream repository: https://github.com/kubernetes/component-helpers
-upstream commit: 30d6dda89a433919aea34553cb5c5083a5ca5f7a
+upstream commit: 8c03f98ede662ab6b26d3fee7cfc21df44b24e0e
 
 files:
   internal/kk/staging/src/k8s.io/component-helpers/auth/rbac/validation/policy_comparator.go
