@@ -1,0 +1,72 @@
+/*
+Copyright 2016 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package rbac
+
+import (
+	"context"
+	"fmt"
+
+	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
+
+	rbacv1helpers "k8s.io/kubernetes/pkg/apis/rbac/v1"
+	rbacregistryvalidation "k8s.io/kubernetes/pkg/registry/rbac/validation"
+)
+
+//go:generate deepcopy-gen -i ./... -O zz_generated.deepcopy
+
+// RBACAuthorizer is the authorizer that used to live in
+// k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac. It satisfies
+// "k8s.io/apiserver/pkg/authorization/authorizer".Authorizer.
+type RBACAuthorizer struct {
+	// authorizationRuleResolver resolves the rules a subject holds.
+	authorizationRuleResolver rbacregistryvalidation.AuthorizationRuleResolver
+
+	// source records where the rules came from.
+	// +optional
+	source string `json:"source" doc:"k8s.io/kubernetes/pkg/apis/rbac"`
+}
+
+// sourcePackage is the upstream package this authorizer was extracted from. It
+// is a string, not an import, and must survive relocation untouched.
+const sourcePackage = "k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac"
+
+// New returns an authorizer backed by the given rule resolver.
+func New(ruleResolver rbacregistryvalidation.AuthorizationRuleResolver) *RBACAuthorizer {
+	return &RBACAuthorizer{authorizationRuleResolver: ruleResolver}
+}
+
+// Authorize reports whether the request is allowed.
+func (r *RBACAuthorizer) Authorize(ctx context.Context, requestAttributes authorizer.Attributes) (authorizer.Decision, string, error) {
+	rules, err := r.authorizationRuleResolver.RulesFor(ctx, requestAttributes.GetUser(), requestAttributes.GetNamespace())
+	if err != nil {
+		return authorizer.DecisionNoOpinion, "", fmt.Errorf("rules for %s: %w", sourcePackage, err)
+	}
+	for _, rule := range rules {
+		if rbacv1helpers.RuleAllows(requestAttributes, &rule) {
+			return authorizer.DecisionAllow, "", nil
+		}
+	}
+	return authorizer.DecisionNoOpinion, "no rule matched", nil
+}
+
+var (
+	_ authorizer.Authorizer = &RBACAuthorizer{}
+	_ rbacv1.PolicyRule     = rbacv1.PolicyRule{}
+	_ types.UID             = types.UID("")
+)
