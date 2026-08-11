@@ -883,3 +883,110 @@ func TestGraphAccessors(t *testing.T) {
 		t.Fatalf("error %v is not an unknown commit", err)
 	}
 }
+
+// TestFirstParentGraphRefusesToShapeAMerge is the fail-closed behaviour that
+// keeps a mainline walk from flattening merges.
+//
+// A first parent walk reports both parents of every merge it passes through but
+// never visits the second one, so the second parent is in the node's parent
+// list and is not a node of the graph. Resolving such a parent through the
+// mapping is impossible, and dropping it turns a merge into an ordinary commit:
+// the replayed history would claim the side branch was never merged.
+func TestFirstParentGraphRefusesToShapeAMerge(t *testing.T) {
+	// The shape rev-list --first-parent --parents produces: the merge keeps
+	// both parents, and only the mainline was walked.
+	graph, err := gitgraph.NewFirstParent(commits(
+		"base",
+		"mainOne base",
+		"merge mainOne feature",
+	))
+	if err != nil {
+		t.Fatalf("build first parent graph: %v", err)
+	}
+	if !graph.FollowsFirstParent() {
+		t.Fatal("a first parent graph must report itself as one")
+	}
+
+	// The parent that was never walked is visible rather than silently absent.
+	boundary, err := graph.BoundaryParents(sha("merge"))
+	if err != nil {
+		t.Fatalf("boundary parents: %v", err)
+	}
+	if !slices.Equal(boundary, shas("feature")) {
+		t.Fatalf("boundary parents = %v, want the unwalked merge parent", labels([]string{"feature"}, boundary))
+	}
+
+	mapping := gitgraph.NewMapping()
+	for _, label := range []string{"base", "mainOne"} {
+		if err := mapping.Set(sha(label), sha("d-"+label)); err != nil {
+			t.Fatalf("record mapping: %v", err)
+		}
+	}
+
+	// A merge cannot be shaped from this graph, and saying so is the point.
+	if _, err := graph.MappedParents(sha("merge"), mapping, nil); !errors.Is(err, gitgraph.ErrFirstParentGraph) {
+		t.Fatalf("mapped parents of a merge = %v, want %v", err, gitgraph.ErrFirstParentGraph)
+	}
+	// Ordinary commits on the mainline are unaffected.
+	parents, err := graph.MappedParents(sha("mainOne"), mapping, nil)
+	if err != nil {
+		t.Fatalf("mapped parents of a mainline commit: %v", err)
+	}
+	if !slices.Equal(parents, []string{sha("d-base")}) {
+		t.Fatalf("mapped parents = %v, want the mapped base", parents)
+	}
+}
+
+// TestMappedParentsDropsBoundedParents pins the case that still has to work: a
+// graph bounded below by an anchor has commits whose parents were excluded on
+// purpose, and the transformed history starts at the boundary rather than
+// reaching behind it.
+func TestMappedParentsDropsBoundedParents(t *testing.T) {
+	// anchor keeps a parent that is outside the graph, exactly as a range
+	// bounded walk produces it.
+	graph, err := gitgraph.New(commits(
+		"anchor beforeAnchor",
+		"one anchor",
+		"side anchor",
+		"merge one side",
+	))
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	if graph.FollowsFirstParent() {
+		t.Fatal("a fully walked graph must not claim to follow first parents")
+	}
+
+	boundary, err := graph.BoundaryParents(sha("anchor"))
+	if err != nil {
+		t.Fatalf("boundary parents: %v", err)
+	}
+	if !slices.Equal(boundary, shas("beforeAnchor")) {
+		t.Fatalf("boundary parents = %v, want the excluded ancestor", boundary)
+	}
+
+	mapping := gitgraph.NewMapping()
+	for _, label := range []string{"anchor", "one", "side"} {
+		if err := mapping.Set(sha(label), sha("d-"+label)); err != nil {
+			t.Fatalf("record mapping: %v", err)
+		}
+	}
+
+	// The anchor has no parent inside the graph, so it becomes a root.
+	parents, err := graph.MappedParents(sha("anchor"), mapping, nil)
+	if err != nil {
+		t.Fatalf("mapped parents of the anchor: %v", err)
+	}
+	if len(parents) != 0 {
+		t.Fatalf("anchor mapped parents = %v, want none", parents)
+	}
+
+	// A merge whose parents were all walked keeps both of them.
+	parents, err = graph.MappedParents(sha("merge"), mapping, nil)
+	if err != nil {
+		t.Fatalf("mapped parents of the merge: %v", err)
+	}
+	if !slices.Equal(parents, shas("d-one", "d-side")) {
+		t.Fatalf("merge mapped parents = %v, want both mapped parents", parents)
+	}
+}

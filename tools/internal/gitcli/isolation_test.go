@@ -344,6 +344,49 @@ func TestPushRejectsWorktreeScopedRewrites(t *testing.T) {
 	}
 }
 
+// homeWithIdentity creates a HOME directory whose git configuration names an
+// identity, and returns the directory.
+//
+// A repository that includes ~/inc.config is what makes HOME observable: git
+// expands the tilde against HOME when it reads the include, so the identity on
+// a commit says which HOME the subprocess actually had. The fixed environment
+// sends global configuration to the null device, which is why the include is
+// the mechanism rather than ~/.gitconfig.
+func homeWithIdentity(t *testing.T, name string) string {
+	t.Helper()
+	home := t.TempDir()
+	contents := "[user]\n\tname = " + name + "\n\temail = " + strings.ReplaceAll(strings.ToLower(name), " ", ".") + "@example.invalid\n"
+	if err := os.WriteFile(filepath.Join(home, "inc.config"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write identity configuration: %v", err)
+	}
+	return home
+}
+
+// commitIdentity initializes a repository that reads its identity from HOME,
+// records one commit through git, and reports the author name git used.
+func commitIdentity(t *testing.T, git *gitcli.Runner) string {
+	t.Helper()
+	ctx := t.Context()
+	if err := git.InitRepository(ctx, "main"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := git.SetConfigLocal(ctx, "include.path", "~/inc.config"); err != nil {
+		t.Fatalf("set include: %v", err)
+	}
+	if err := git.Commit(ctx, gitcli.CommitOptions{Message: "chore: identity probe\n", AllowEmpty: true}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	head, err := git.ResolveCommit(ctx, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	commit, err := git.CommitInfo(ctx, head)
+	if err != nil {
+		t.Fatalf("commit info: %v", err)
+	}
+	return commit.AuthorName
+}
+
 // TestAnonymousPreservesIsolation proves that stripping credentials does not
 // also strip the entries that decide where git looks for state.
 //
@@ -357,33 +400,16 @@ func TestAnonymousPreservesIsolation(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 
-	// The process HOME is a directory whose configuration must never be read.
-	processHome := t.TempDir()
-	t.Setenv("HOME", processHome)
-	if err := os.WriteFile(filepath.Join(processHome, ".gitconfig"),
-		[]byte("[user]\n\tname = Operator Identity\n\temail = operator@example.invalid\n"), 0o600); err != nil {
-		t.Fatalf("write operator configuration: %v", err)
-	}
-
-	// The run redirects HOME, and points global configuration inside it, which
-	// is the only way the redirection is observable: the fixed environment sends
-	// global configuration to the null device unless a caller overrides it.
-	isolatedHome := t.TempDir()
-	const isolatedName = "Isolated Identity"
-	if err := os.WriteFile(filepath.Join(isolatedHome, ".gitconfig"),
-		[]byte("[user]\n\tname = "+isolatedName+"\n\temail = isolated@example.invalid\n"), 0o600); err != nil {
-		t.Fatalf("write isolated configuration: %v", err)
-	}
+	// The process HOME holds configuration this run must never read.
+	t.Setenv("HOME", homeWithIdentity(t, "Operator Identity"))
+	isolated := homeWithIdentity(t, "Isolated Identity")
 
 	const token = "ghs_notarealtoken" //nolint:gosec // a fixture value, not a credential
 	runner, err := gitcli.New(ctx, gitcli.Options{
-		Dir:     dir,
-		Inherit: []string{"PATH", "HOME"},
-		Isolation: []string{
-			"HOME=" + isolatedHome,
-			"GIT_CONFIG_GLOBAL=" + filepath.Join(isolatedHome, ".gitconfig"),
-		},
-		Env: []string{"SOAPBOX_TOKEN=" + token},
+		Dir:       dir,
+		Inherit:   []string{"PATH", "HOME"},
+		Isolation: []string{"HOME=" + isolated},
+		Env:       []string{"SOAPBOX_TOKEN=" + token},
 	})
 	if err != nil {
 		t.Fatalf("create runner: %v", err)
@@ -396,23 +422,8 @@ func TestAnonymousPreservesIsolation(t *testing.T) {
 	if !anonymous.IsAnonymous() {
 		t.Fatal("Anonymous must produce an anonymous runner")
 	}
-	if err := anonymous.InitRepository(ctx, "main"); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-	if err := anonymous.Commit(ctx, gitcli.CommitOptions{Message: "chore: isolated\n", AllowEmpty: true}); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	head, err := anonymous.ResolveCommit(ctx, "HEAD")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	commit, err := anonymous.CommitInfo(ctx, head)
-	if err != nil {
-		t.Fatalf("commit info: %v", err)
-	}
-	// The identity proves which HOME the subprocess actually read.
-	if commit.AuthorName != isolatedName {
-		t.Fatalf("author %q, want the isolated identity %q", commit.AuthorName, isolatedName)
+	if got := commitIdentity(t, anonymous); got != "Isolated Identity" {
+		t.Fatalf("author %q, want the isolated identity, so HOME survived credential stripping", got)
 	}
 
 	// The credential is gone, and its value is still scrubbed from output.
@@ -424,24 +435,17 @@ func TestAnonymousPreservesIsolation(t *testing.T) {
 // TestAnonymousIgnoresLaterProcessEnvironmentChanges proves the inherited
 // values are the ones read when the runner was built.
 //
-// Anonymous used to rebuild the environment by reading the process again, so a
-// value that changed in between would take effect at the moment credentials
-// were stripped, which is the one moment a run must not change behaviour.
+// Anonymous rebuilt the environment by reading the process again, so a value
+// that changed in between would take effect at the moment credentials were
+// stripped, which is the one moment a run must not change behaviour.
 func TestAnonymousIgnoresLaterProcessEnvironmentChanges(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 
-	first := t.TempDir()
-	const constructedName = "Constructed Identity"
-	if err := os.WriteFile(filepath.Join(first, ".gitconfig"),
-		[]byte("[user]\n\tname = "+constructedName+"\n\temail = first@example.invalid\n"), 0o600); err != nil {
-		t.Fatalf("write configuration: %v", err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(first, ".gitconfig"))
-
+	t.Setenv("HOME", homeWithIdentity(t, "Constructed Identity"))
 	runner, err := gitcli.New(ctx, gitcli.Options{
 		Dir:     dir,
-		Inherit: []string{"PATH", "GIT_CONFIG_GLOBAL"},
+		Inherit: []string{"PATH", "HOME"},
 		Env:     []string{"SOAPBOX_TOKEN=value"},
 	})
 	if err != nil {
@@ -449,31 +453,10 @@ func TestAnonymousIgnoresLaterProcessEnvironmentChanges(t *testing.T) {
 	}
 
 	// The process moves on after the runner was built.
-	second := t.TempDir()
-	if err := os.WriteFile(filepath.Join(second, ".gitconfig"),
-		[]byte("[user]\n\tname = Later Identity\n\temail = later@example.invalid\n"), 0o600); err != nil {
-		t.Fatalf("write configuration: %v", err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(second, ".gitconfig"))
+	t.Setenv("HOME", homeWithIdentity(t, "Later Identity"))
 
-	anonymous := runner.Anonymous()
-	if err := anonymous.InitRepository(ctx, "main"); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-	if err := anonymous.Commit(ctx, gitcli.CommitOptions{Message: "chore: snapshot\n", AllowEmpty: true}); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	head, err := anonymous.ResolveCommit(ctx, "HEAD")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	commit, err := anonymous.CommitInfo(ctx, head)
-	if err != nil {
-		t.Fatalf("commit info: %v", err)
-	}
-	if commit.AuthorName != constructedName {
-		t.Fatalf("author %q, want the value inherited when the runner was built, %q",
-			commit.AuthorName, constructedName)
+	if got := commitIdentity(t, runner.Anonymous()); got != "Constructed Identity" {
+		t.Fatalf("author %q, want the value inherited when the runner was built", got)
 	}
 }
 
