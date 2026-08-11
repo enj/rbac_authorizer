@@ -1,0 +1,12 @@
+/bin/
+/dist/
+/.cache/
+/.soapbox-cache/
+/soapbox-report/
+/coverage.out
+/coverage.html
+*.test
+*.out
+.idea/
+.vscode/
+.DS_Store

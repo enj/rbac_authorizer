@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+**/zz_generated*.go linguist-generated=true
+**/testdata/** linguist-generated=true

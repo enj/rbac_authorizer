@@ -1,0 +1,12 @@
+Soapbox
+Copyright 2026 Monis Khan
+
+This product is licensed under the Apache License, Version 2.0.
+
+Soapbox generates derivative source from the Kubernetes project. Generated
+repositories retain upstream copyright and attribution notices and include
+file-level and package-level records describing relocation, rewriting,
+pruning, patches, and source revisions.
+
+Kubernetes is a project of The Linux Foundation. Kubernetes source is
+available at https://github.com/kubernetes/kubernetes.
