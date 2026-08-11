@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,40 @@ const PublishHost = "github.com"
 
 // redactedUser replaces user information in a rendered remote URL.
 const redactedUser = "redacted"
+
+// The oldest Git release every command in this package is proved against.
+//
+// The floor is set by GIT_NO_LAZY_FETCH, which the object probes rely on to
+// answer "do I already have this object" without letting a partial clone
+// silently download the history it is being asked about. The variable is only a
+// documented, generally honoured knob from 2.45; it was backported into the
+// 2024-04-10 maintenance releases (2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4,
+// 2.44.1), but on any older release it is read by nothing and the probe would
+// quietly reach the network instead of failing. A feature whose absence is
+// silent has to be pinned to the release that documents it.
+//
+// The other version sensitive commands this package issues are all older:
+// sparse-checkout set --no-cone is 2.35 and is load bearing because cone mode
+// became the default in 2.37, clone and fetch --filter are 2.17,
+// fetch --no-write-fetch-head is 2.29, the worktree config extension and
+// config --worktree are 2.20, worktree add --no-checkout is 2.9,
+// worktree list --porcelain is 2.7, merge-base --octopus --all is 1.7.3,
+// rev-list --missing and --filter-print-omitted are 2.16, and the
+// compare-and-swap form of update-ref predates all of them.
+//
+// TestMinimumVersionCapabilities exercises each of these against the Git the
+// tests actually run, so the claim is checked rather than asserted.
+const (
+	minimumVersionMajor = 2
+	minimumVersionMinor = 45
+)
+
+// MinimumVersion reports the oldest Git release this package supports. It is
+// exported so the preflight check and the engine's doctor report a single
+// number rather than two that can drift apart.
+func MinimumVersion() Version {
+	return Version{Major: minimumVersionMajor, Minor: minimumVersionMinor}
+}
 
 // defaultInherit lists the process environment variables a Git subprocess may
 // see. Everything else is dropped so runs do not depend on ambient state.
@@ -68,12 +103,22 @@ type Options struct {
 	// working directory.
 	Dir string
 	// Inherit names the process environment variables to pass through. Empty
-	// means the default set.
+	// means the default set. The values are read once, here, so a later change
+	// to the process environment cannot alter what an already built runner does.
 	Inherit []string
-	// Env holds additional KEY=VALUE entries applied after the inherited and
-	// fixed entries, which is how credentials reach Git. Every non-empty value
-	// is seeded into the redactor, so an entry cannot leak by being forgotten in
-	// Secrets.
+	// Isolation holds KEY=VALUE entries that decide where Git looks for state
+	// rather than granting access to anything, such as HOME or TMPDIR. They
+	// carry no credential, so they survive Anonymous: a run that redirected HOME
+	// to keep a subprocess away from operator configuration must stay redirected
+	// when it talks to the source host. They are not seeded into the redactor,
+	// because a path is not a secret and redacting it would corrupt output.
+	Isolation []string
+	// Env holds additional KEY=VALUE entries applied after the inherited, fixed,
+	// and isolation entries, which is how credentials reach Git. Every non-empty
+	// value is seeded into the redactor, so an entry cannot leak by being
+	// forgotten in Secrets. A runner with any entry here is treated as possibly
+	// carrying a credential and is refused by the source commands until
+	// Anonymous strips them.
 	Env []string
 	// Secrets holds additional exact values that must never appear in captured
 	// output.
@@ -82,10 +127,22 @@ type Options struct {
 
 // Runner executes Git commands with a controlled environment.
 type Runner struct {
-	binary   string
-	dir      string
-	env      []string
-	redactor *Redactor
+	binary string
+	dir    string
+	// ceiling stops repository discovery from ascending above dir. It is set by
+	// WithDir, where the caller has named the exact repository to operate on, so
+	// a command can never silently act on a repository that happens to sit above
+	// a directory that lost its own.
+	ceiling string
+	env     []string
+	// inherited is the snapshot of the process entries taken in New. Anonymous
+	// rebuilds from it rather than from the process, so stripping credentials
+	// cannot also pick up an environment that changed in between.
+	inherited []string
+	// isolation is retained for the same reason: it has to survive Anonymous.
+	isolation []string
+	anonymous bool
+	redactor  *Redactor
 }
 
 // New resolves the Git executable and builds the subprocess environment.
@@ -105,20 +162,58 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 		binary = resolved
 	}
 	if opts.Dir != "" {
-		info, err := os.Stat(opts.Dir)
-		if err != nil {
-			return nil, fmt.Errorf("git working directory: %w", err)
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("git working directory: %q is not a directory", opts.Dir)
+		if err := validateDirectory("git working directory", opts.Dir); err != nil {
+			return nil, err
 		}
 	}
+	for _, entry := range opts.Isolation {
+		if err := validateEnvEntry("isolation entry", entry); err != nil {
+			return nil, fmt.Errorf("git runner: %w", err)
+		}
+	}
+	for _, entry := range opts.Env {
+		if err := validateEnvEntry("environment entry", entry); err != nil {
+			return nil, fmt.Errorf("git runner: %w", err)
+		}
+	}
+	inherited := inheritedEnv(opts.Inherit)
+	isolation := slices.Clone(opts.Isolation)
 	return &Runner{
-		binary:   binary,
-		dir:      opts.Dir,
-		env:      buildEnv(opts.Inherit, opts.Env),
-		redactor: NewRedactor(append(envValues(opts.Env), opts.Secrets...)...),
+		binary:    binary,
+		dir:       opts.Dir,
+		env:       assembleEnv(inherited, isolation, opts.Env),
+		inherited: inherited,
+		isolation: isolation,
+		anonymous: len(opts.Env) == 0,
+		redactor:  NewRedactor(append(envValues(opts.Env), opts.Secrets...)...),
 	}, nil
+}
+
+// validateDirectory checks that a working directory exists and is a directory.
+func validateDirectory(kind, dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s: %q is not a directory", kind, dir)
+	}
+	return nil
+}
+
+// validateEnvEntry rejects an entry that is not a KEY=VALUE pair, which would
+// otherwise reach the subprocess as an unnamed value or silently shadow nothing.
+func validateEnvEntry(kind, entry string) error {
+	name, _, ok := strings.Cut(entry, "=")
+	switch {
+	case !ok:
+		return fmt.Errorf("%s %q must be KEY=VALUE", kind, name)
+	case name == "":
+		return fmt.Errorf("%s must name a variable", kind)
+	case strings.ContainsRune(entry, '\x00'):
+		return fmt.Errorf("%s %q must not contain a null byte", kind, name)
+	}
+	return nil
 }
 
 // envValues reports the value half of every KEY=VALUE entry. Redaction is
@@ -144,27 +239,97 @@ func (r *Runner) Dir() string { return r.dir }
 func (r *Runner) Redactor() *Redactor { return r.redactor }
 
 // WithDir returns a copy of the runner that operates in dir.
-func (r *Runner) WithDir(dir string) *Runner {
+//
+// The directory is checked exactly as New checks one, because a runner pointed
+// at a path that was never created would otherwise run its first command in the
+// process working directory. The path must be absolute for the same reason.
+//
+// Discovery is also pinned: a command run through the returned runner may find
+// the repository at dir but may never ascend to one above it. Without that, a
+// cache directory that was removed or never finished being written would hand
+// every later command whatever repository happens to contain it.
+func (r *Runner) WithDir(dir string) (*Runner, error) {
+	if err := validateAbsolutePath("git working directory", dir); err != nil {
+		return nil, err
+	}
+	if err := validateDirectory("git working directory", dir); err != nil {
+		return nil, err
+	}
+	ceiling, err := discoveryCeiling(dir)
+	if err != nil {
+		return nil, err
+	}
 	clone := *r
 	clone.dir = dir
+	clone.ceiling = ceiling
+	return &clone, nil
+}
+
+// discoveryCeiling reports the directory Git must not ascend past to keep
+// repository discovery inside dir.
+//
+// Git compares the ceiling against the physical path it walks, so a ceiling
+// that still contains a symbolic link is ignored, and it stops before entering
+// a listed directory rather than at it: confining discovery to dir means naming
+// dir's parent.
+func discoveryCeiling(dir string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("git working directory: %w", err)
+	}
+	parent := filepath.Dir(resolved)
+	if parent == resolved {
+		// A filesystem root has nothing above it to discover.
+		return "", nil
+	}
+	return parent, nil
+}
+
+// Anonymous returns a copy of the runner with every caller supplied environment
+// entry dropped, which is how a credential that reached this runner through
+// Options.Env is kept away from a subprocess that talks to the public source
+// host. The redactor is preserved, because output must still be scrubbed even
+// when this particular command cannot see the secret.
+//
+// Isolation entries are kept. They decide where Git looks for state rather than
+// granting access to anything, and a run that redirected HOME away from
+// operator configuration must stay redirected when it reaches the network.
+func (r *Runner) Anonymous() *Runner {
+	clone := *r
+	clone.env = assembleEnv(r.inherited, r.isolation, nil)
+	clone.anonymous = true
 	return &clone
 }
 
-// buildEnv assembles the subprocess environment from inherited names, the fixed
-// entries, and caller supplied entries. Later entries win, which lets a caller
-// override HOME for an isolated run.
-func buildEnv(inherit, extra []string) []string {
+// IsAnonymous reports whether the runner carries no caller supplied environment
+// entries. Source acquisition asserts this before it reaches the network.
+func (r *Runner) IsAnonymous() bool { return r.anonymous }
+
+// inheritedEnv snapshots the named process environment variables as KEY=VALUE
+// entries, in the order they were named.
+func inheritedEnv(inherit []string) []string {
 	names := inherit
 	if len(names) == 0 {
 		names = defaultInherit
 	}
-	env := make([]string, 0, len(names)+len(fixedEnv)+len(extra))
+	env := make([]string, 0, len(names))
 	for _, name := range names {
 		if value, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
+	return env
+}
+
+// assembleEnv joins the inherited snapshot, the fixed entries, the isolation
+// entries, and the caller supplied entries. Later entries win, which is how a
+// caller overrides HOME for an isolated run and how per commit identity is
+// supplied without touching an argument vector.
+func assembleEnv(inherited, isolation, extra []string) []string {
+	env := make([]string, 0, len(inherited)+len(fixedEnv)+len(isolation)+len(extra))
+	env = append(env, inherited...)
 	env = append(env, fixedEnv...)
+	env = append(env, isolation...)
 	return append(env, extra...)
 }
 
@@ -213,6 +378,26 @@ func (r *Runner) run(ctx context.Context, args ...string) (string, error) {
 // entries are appended last so they win over the runner environment, which is
 // how per commit identity is supplied without touching an argument vector.
 func (r *Runner) runWith(ctx context.Context, extraEnv []string, args ...string) (string, error) {
+	return r.runInput(ctx, nil, extraEnv, args...)
+}
+
+// runInput executes one Git command, optionally feeding it standard input, and
+// returns only its standard output.
+func (r *Runner) runInput(ctx context.Context, stdin []byte, extraEnv []string, args ...string) (string, error) {
+	out, _, err := r.runCapture(ctx, stdin, extraEnv, args...)
+	return out, err
+}
+
+// runCapture executes one Git command and returns both redacted streams.
+//
+// Standard error is returned on success as well as on failure, because some of
+// git's most consequential verdicts are warnings: a server that ignored the
+// object filter and sent a complete history says so there and exits zero.
+//
+// The input is an in memory slice rather than an inherited descriptor, so a
+// subprocess can never read from the operator's terminal and a command that
+// exits early cannot leave the engine blocked on a pipe.
+func (r *Runner) runCapture(ctx context.Context, stdin []byte, extraEnv []string, args ...string) (string, string, error) {
 	var stdout, stderr bytes.Buffer
 	outWriter := r.redactor.Writer(&stdout)
 	errWriter := r.redactor.Writer(&stderr)
@@ -221,12 +406,19 @@ func (r *Runner) runWith(ctx context.Context, extraEnv []string, args ...string)
 	cmd := exec.CommandContext(ctx, r.binary, full...)
 	cmd.Dir = r.dir
 	cmd.Env = r.env
-	if len(extraEnv) > 0 {
-		cmd.Env = append(append([]string{}, r.env...), extraEnv...)
+	if r.ceiling != "" || len(extraEnv) > 0 {
+		env := slices.Clone(r.env)
+		if r.ceiling != "" {
+			env = append(env, "GIT_CEILING_DIRECTORIES="+r.ceiling)
+		}
+		cmd.Env = append(env, extraEnv...)
 	}
 	cmd.Stdout = outWriter
 	cmd.Stderr = errWriter
 	cmd.Stdin = nil
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.WaitDelay = commandWaitDelay
 
 	runErr := cmd.Run()
@@ -236,13 +428,13 @@ func (r *Runner) runWith(ctx context.Context, extraEnv []string, args ...string)
 	}
 	if runErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return stdout.String(), errors.Join(fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), ctxErr), closeErr)
+			return stdout.String(), stderr.String(), errors.Join(fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), ctxErr), closeErr)
 		}
 		exitCode := -1
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
-		return stdout.String(), errors.Join(&ExecError{
+		return stdout.String(), stderr.String(), errors.Join(&ExecError{
 			Args:     r.redactor.Strings(args),
 			ExitCode: exitCode,
 			Stderr:   stderr.String(),
@@ -250,9 +442,9 @@ func (r *Runner) runWith(ctx context.Context, extraEnv []string, args ...string)
 		}, closeErr)
 	}
 	if closeErr != nil {
-		return stdout.String(), closeErr
+		return stdout.String(), stderr.String(), closeErr
 	}
-	return stdout.String(), nil
+	return stdout.String(), stderr.String(), nil
 }
 
 // Version is a parsed Git or Go release version.
@@ -322,6 +514,24 @@ func (r *Runner) Version(ctx context.Context) (Version, error) {
 		return Version{}, fmt.Errorf("git version: %w", err)
 	}
 	return version, nil
+}
+
+// RequireMinimumVersion fails when the resolved Git is older than the release
+// every command in this package is proved against.
+//
+// It is a preflight rather than a nicety. The oldest capability this package
+// depends on, GIT_NO_LAZY_FETCH, is ignored rather than rejected by a Git that
+// does not know it, so an old binary would turn a local object probe into a
+// silent network fetch instead of an error.
+func (r *Runner) RequireMinimumVersion(ctx context.Context) error {
+	version, err := r.Version(ctx)
+	if err != nil {
+		return err
+	}
+	if !version.AtLeast(MinimumVersion()) {
+		return fmt.Errorf("git %s is older than the required %s", version, MinimumVersion())
+	}
+	return nil
 }
 
 // InitRepository creates a repository in the runner's working directory.
@@ -539,6 +749,20 @@ func parseTrailers(block string) []Trailer {
 	return trailers
 }
 
+// ParseTrailers reports the trailers git itself finds in a commit message.
+//
+// This is git's own answer rather than an approximation of it: interpret-trailers
+// applies the trailer block rules, folds continuation lines, and ignores a patch
+// part. It reads no repository, so it works anywhere, and it is the reference
+// the pure implementation in gitgraph is checked against.
+func (r *Runner) ParseTrailers(ctx context.Context, message string) ([]Trailer, error) {
+	out, err := r.runInput(ctx, []byte(message), nil, "interpret-trailers", "--parse")
+	if err != nil {
+		return nil, fmt.Errorf("git interpret-trailers: %w", err)
+	}
+	return parseTrailers(strings.TrimSuffix(out, "\n")), nil
+}
+
 // Signature is a Git author or committer identity with an optional date. The
 // date uses any format git accepts, such as RFC 3339.
 type Signature struct {
@@ -645,7 +869,7 @@ func (r *Runner) Push(ctx context.Context, remote string, refspecs ...string) er
 			return fmt.Errorf("git push: %w", err)
 		}
 	}
-	if err := r.assertNoRemoteRewrites(ctx, remote); err != nil {
+	if err := r.assertNoRemoteRewrites(ctx); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 	// The empty credential.helper resets the helper list, so a repository local
@@ -664,30 +888,41 @@ func (r *Runner) Push(ctx context.Context, remote string, refspecs ...string) er
 	return nil
 }
 
-// assertNoRemoteRewrites fails closed when repository local configuration could
-// silently redirect a network push. Global and system configuration are already
-// neutralised for every subprocess, so only local rewrites remain.
-func (r *Runner) assertNoRemoteRewrites(ctx context.Context, remote string) error {
-	if !isNetworkRemote(remote) {
-		return nil
-	}
-	for _, pattern := range []string{`^url\..*\.(insteadof|pushinsteadof)$`, `^remote\..*\.pushurl$`} {
-		out, err := r.run(ctx, "config", "--local", "--name-only", "--get-regexp", "--end-of-options", pattern)
+// assertNoRemoteRewrites fails closed when configuration this repository can
+// see would silently redirect a command that names a remote explicitly.
+//
+// Every scope is queried, not just the local one. Global and system
+// configuration are already neutralised for every subprocess, so what remains
+// is the repository's own config and its per work tree config, and the latter
+// is invisible to a --local query: a rewrite parked in config.worktree would
+// pass a local-only check and still redirect the transfer.
+//
+// The gate does not depend on the target's scheme. A file mirror is redirected
+// by exactly the same mechanism as an https remote, and a test that proves the
+// gate on a file URL is the test that proves it for github.com.
+func (r *Runner) assertNoRemoteRewrites(ctx context.Context) error {
+	for _, pattern := range rewritePatterns {
+		out, err := r.run(ctx, "config", "--name-only", "--get-regexp", "--end-of-options", pattern)
 		switch {
 		case err == nil:
 			names := strings.Fields(out)
-			return fmt.Errorf("repository local %s rewrites the push target", strings.Join(names, ", "))
+			slices.Sort(names)
+			return fmt.Errorf("repository configuration %s rewrites the remote", strings.Join(slices.Compact(names), ", "))
 		case ExitCodeOf(err) == 1:
 		default:
-			return fmt.Errorf("read local push configuration: %w", err)
+			return fmt.Errorf("read remote rewrite configuration: %w", err)
 		}
 	}
 	return nil
 }
 
-// isNetworkRemote reports whether a remote reaches the network.
-func isNetworkRemote(remote string) bool {
-	return strings.HasPrefix(remote, "https://")
+// rewritePatterns match the configuration keys that redirect a transfer whose
+// remote was named explicitly on the command line. insteadOf rewrites the URL
+// git connects to, pushInsteadOf does the same for a push, and a remote's
+// pushurl replaces the target of one.
+var rewritePatterns = []string{
+	`^url\..*\.(insteadof|pushinsteadof)$`,
+	`^remote\..*\.pushurl$`,
 }
 
 // rejectedRef returns the first rejected ref line of git push porcelain output.

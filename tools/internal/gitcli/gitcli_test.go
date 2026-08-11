@@ -3,6 +3,7 @@ package gitcli_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -350,7 +351,10 @@ func TestRunnerWithDir(t *testing.T) {
 	second := t.TempDir()
 
 	runner := newRunner(t, first)
-	moved := runner.WithDir(second)
+	moved, err := runner.WithDir(second)
+	if err != nil {
+		t.Fatalf("move runner: %v", err)
+	}
 	if runner.Dir() != first {
 		t.Fatalf("original runner directory changed to %q", runner.Dir())
 	}
@@ -359,6 +363,64 @@ func TestRunnerWithDir(t *testing.T) {
 	}
 	if _, err := moved.IsRepository(ctx); err != nil {
 		t.Fatalf("probe moved runner: %v", err)
+	}
+}
+
+// TestRunnerWithDirValidatesTheDirectory proves a runner cannot be pointed at a
+// path that does not exist or is not a directory. Without the check the first
+// command would silently run in the process working directory, which is
+// whatever directory the operator happened to start the engine from.
+func TestRunnerWithDirValidatesTheDirectory(t *testing.T) {
+	root := t.TempDir()
+	runner := newRunner(t, root)
+
+	file := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		dir  string
+	}{
+		{name: "missing", dir: filepath.Join(root, "absent")},
+		{name: "not a directory", dir: file},
+		{name: "relative", dir: "relative/path"},
+		{name: "empty", dir: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := runner.WithDir(test.dir); err == nil {
+				t.Fatalf("WithDir(%q) must not accept the directory", test.dir)
+			}
+		})
+	}
+}
+
+// TestRunnerWithDirDoesNotDiscoverAncestorRepositories proves a runner scoped to
+// an exact directory never acts on a repository above it. A cache directory that
+// was emptied would otherwise hand every later command whatever repository
+// happens to contain it.
+func TestRunnerWithDirDoesNotDiscoverAncestorRepositories(t *testing.T) {
+	ctx := t.Context()
+	ancestor := testsupport.NewRepo(ctx, t, testsupport.Options{UserName: testUserName, UserEmail: testUserEmail})
+	ancestor.WriteAndCommit(ctx, t, "a.txt", "a\n", "feat: a\n")
+
+	inside := filepath.Join(ancestor.Dir, "not-a-cache")
+	if err := os.MkdirAll(inside, 0o750); err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+
+	scoped, err := newRunner(t, ancestor.Dir).WithDir(inside)
+	if err != nil {
+		t.Fatalf("scope runner: %v", err)
+	}
+	repository, err := scoped.IsRepository(ctx)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if repository {
+		t.Fatal("a directory that holds no repository must not report the repository above it")
 	}
 }
 

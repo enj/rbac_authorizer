@@ -26,11 +26,11 @@ func TestFixedEnvironmentIsolatesAmbientConfiguration(t *testing.T) {
 	}
 }
 
-func TestBuildEnvDropsAmbientVariables(t *testing.T) {
+func TestAssembleEnvDropsAmbientVariables(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Ambient Identity")
 	t.Setenv("SOAPBOX_UNRELATED", "value")
 
-	env := buildEnv(nil, []string{"SOAPBOX_TOKEN=secret"})
+	env := assembleEnv(inheritedEnv(nil), nil, []string{"SOAPBOX_TOKEN=secret"})
 	for _, entry := range env {
 		name, _, _ := strings.Cut(entry, "=")
 		switch name {
@@ -44,6 +44,40 @@ func TestBuildEnvDropsAmbientVariables(t *testing.T) {
 	// Caller entries come last so they win over the inherited and fixed ones.
 	if env[len(env)-1] != "SOAPBOX_TOKEN=secret" {
 		t.Errorf("caller entry is not last: %v", env)
+	}
+}
+
+// TestAssembleEnvOrdersIsolationBeforeCredentials pins the precedence the two
+// caller supplied channels have: isolation entries shape where git looks and
+// may be overridden by an explicit Env entry, and both outrank the fixed set.
+func TestAssembleEnvOrdersIsolationBeforeCredentials(t *testing.T) {
+	env := assembleEnv([]string{"HOME=/process"}, []string{"HOME=/isolated"}, []string{"HOME=/explicit"})
+	last := ""
+	for _, entry := range env {
+		if name, value, _ := strings.Cut(entry, "="); name == "HOME" {
+			last = value
+		}
+	}
+	if last != "/explicit" {
+		t.Errorf("effective HOME = %q, want the caller supplied entry to win", last)
+	}
+	if got := slices.Index(env, "HOME=/isolated"); got < 0 {
+		t.Error("isolation entry is missing from the subprocess environment")
+	} else if got < slices.Index(env, "GIT_TERMINAL_PROMPT=0") {
+		t.Error("isolation entries must be applied after the fixed entries so they can override one")
+	}
+}
+
+// TestInheritedEnvSnapshotsTheProcess proves the inherited values are read once,
+// so a runner cannot change behaviour because the process environment moved
+// under it between construction and use.
+func TestInheritedEnvSnapshotsTheProcess(t *testing.T) {
+	t.Setenv("SOAPBOX_SNAPSHOT", "first")
+	snapshot := inheritedEnv([]string{"SOAPBOX_SNAPSHOT"})
+	t.Setenv("SOAPBOX_SNAPSHOT", "second")
+
+	if !slices.Equal(snapshot, []string{"SOAPBOX_SNAPSHOT=first"}) {
+		t.Fatalf("inherited snapshot = %v, want the value read at construction", snapshot)
 	}
 }
 

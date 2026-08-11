@@ -250,15 +250,41 @@ func TestPushRejectsLocalRemoteRewrites(t *testing.T) {
 	ctx := t.Context()
 	repo := testsupport.NewRepo(ctx, t, testsupport.Options{UserName: testUserName, UserEmail: testUserEmail})
 	repo.WriteAndCommit(ctx, t, "a.txt", "a\n", "feat: a\n")
+	local := testsupport.NewRepo(ctx, t, testsupport.Options{UserName: testUserName, UserEmail: testUserEmail})
 
 	tests := []struct {
 		name  string
 		key   string
 		value string
+		// remote is the push target. A file target is covered as well as the
+		// publish host, because a rewrite redirects both by the same mechanism
+		// and only the local one can be proved against a real server.
+		remote string
 	}{
-		{name: "insteadOf", key: "url.https://attacker.example.com/.insteadOf", value: "https://github.com/"},
-		{name: "pushInsteadOf", key: "url.https://attacker.example.com/.pushInsteadOf", value: "https://github.com/"},
-		{name: "pushurl", key: "remote.origin.pushurl", value: "https://attacker.example.com/enj/x.git"},
+		{
+			name:   "insteadOf",
+			key:    "url.https://attacker.example.com/.insteadOf",
+			value:  "https://github.com/",
+			remote: "https://github.com/enj/rbac_authorizer.git",
+		},
+		{
+			name:   "pushInsteadOf",
+			key:    "url.https://attacker.example.com/.pushInsteadOf",
+			value:  "https://github.com/",
+			remote: "https://github.com/enj/rbac_authorizer.git",
+		},
+		{
+			name:   "pushurl",
+			key:    "remote.origin.pushurl",
+			value:  "https://attacker.example.com/enj/x.git",
+			remote: "https://github.com/enj/rbac_authorizer.git",
+		},
+		{
+			name:   "insteadOf on a file mirror",
+			key:    "url.file:///attacker/.insteadOf",
+			value:  "file://" + local.Dir,
+			remote: local.Dir,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -269,14 +295,185 @@ func TestPushRejectsLocalRemoteRewrites(t *testing.T) {
 				}
 			})
 
-			err := repo.Git.Push(ctx, "https://github.com/enj/rbac_authorizer.git", "refs/heads/main:refs/heads/main")
+			err := repo.Git.Push(ctx, test.remote, "refs/heads/main:refs/heads/main")
 			if err == nil {
 				t.Fatal("expected the push to fail closed")
 			}
-			if !strings.Contains(err.Error(), "rewrites the push target") {
-				t.Fatalf("error %q does not report a rewritten push target", err)
+			if !strings.Contains(err.Error(), "rewrites the remote") {
+				t.Fatalf("error %q does not report a rewritten remote", err)
 			}
 		})
+	}
+}
+
+// TestPushRejectsWorktreeScopedRewrites proves the gate is not fooled by the
+// configuration scope a --local query cannot see.
+//
+// Enabling the worktree configuration extension gives a repository a second
+// file whose keys outrank the local ones. A rewrite parked there redirects the
+// transfer exactly like a local one and is invisible to git config --local, so
+// a gate that only looked there would pass a push straight to the attacker.
+func TestPushRejectsWorktreeScopedRewrites(t *testing.T) {
+	ctx := t.Context()
+	repo := testsupport.NewRepo(ctx, t, testsupport.Options{UserName: testUserName, UserEmail: testUserEmail})
+	repo.WriteAndCommit(ctx, t, "a.txt", "a\n", "feat: a\n")
+
+	repo.SetConfig(ctx, t, "extensions.worktreeConfig", "true")
+	// The file is written directly because that is how a restored or tampered
+	// repository would carry it: no git command has to have been run for the
+	// key to take effect on the next transfer.
+	worktreeConfig := filepath.Join(repo.Dir, ".git", "config.worktree")
+	contents := "[url \"https://attacker.example.com/\"]\n\tinsteadOf = https://github.com/\n"
+	if err := os.WriteFile(worktreeConfig, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write worktree scoped configuration: %v", err)
+	}
+
+	// The key really is invisible to the scope a naive gate would query.
+	if _, found, err := repo.Git.ConfigLocal(ctx, "url.https://attacker.example.com/.insteadOf"); err != nil {
+		t.Fatalf("read local configuration: %v", err)
+	} else if found {
+		t.Fatal("the fixture did not exercise the worktree scope")
+	}
+
+	err := repo.Git.Push(ctx, "https://github.com/enj/rbac_authorizer.git", "refs/heads/main:refs/heads/main")
+	if err == nil {
+		t.Fatal("expected the push to fail closed")
+	}
+	if !strings.Contains(err.Error(), "rewrites the remote") {
+		t.Fatalf("error %q does not report a rewritten remote", err)
+	}
+}
+
+// TestAnonymousPreservesIsolation proves that stripping credentials does not
+// also strip the entries that decide where git looks for state.
+//
+// The two are different kinds of thing. A token grants access and must never
+// reach the source host; an isolated HOME withholds access and must survive,
+// because a run that redirected git away from operator configuration has to
+// stay redirected when it reaches the network. Rebuilding the environment from
+// the process would silently restore the operator's HOME at exactly the moment
+// the run stopped being trusted.
+func TestAnonymousPreservesIsolation(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+
+	// The process HOME is a directory whose configuration must never be read.
+	processHome := t.TempDir()
+	t.Setenv("HOME", processHome)
+	if err := os.WriteFile(filepath.Join(processHome, ".gitconfig"),
+		[]byte("[user]\n\tname = Operator Identity\n\temail = operator@example.invalid\n"), 0o600); err != nil {
+		t.Fatalf("write operator configuration: %v", err)
+	}
+
+	// The run redirects HOME, and points global configuration inside it, which
+	// is the only way the redirection is observable: the fixed environment sends
+	// global configuration to the null device unless a caller overrides it.
+	isolatedHome := t.TempDir()
+	const isolatedName = "Isolated Identity"
+	if err := os.WriteFile(filepath.Join(isolatedHome, ".gitconfig"),
+		[]byte("[user]\n\tname = "+isolatedName+"\n\temail = isolated@example.invalid\n"), 0o600); err != nil {
+		t.Fatalf("write isolated configuration: %v", err)
+	}
+
+	const token = "ghs_notarealtoken" //nolint:gosec // a fixture value, not a credential
+	runner, err := gitcli.New(ctx, gitcli.Options{
+		Dir:     dir,
+		Inherit: []string{"PATH", "HOME"},
+		Isolation: []string{
+			"HOME=" + isolatedHome,
+			"GIT_CONFIG_GLOBAL=" + filepath.Join(isolatedHome, ".gitconfig"),
+		},
+		Env: []string{"SOAPBOX_TOKEN=" + token},
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	if runner.IsAnonymous() {
+		t.Fatal("a runner carrying an Env entry must not be anonymous")
+	}
+
+	anonymous := runner.Anonymous()
+	if !anonymous.IsAnonymous() {
+		t.Fatal("Anonymous must produce an anonymous runner")
+	}
+	if err := anonymous.InitRepository(ctx, "main"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := anonymous.Commit(ctx, gitcli.CommitOptions{Message: "chore: isolated\n", AllowEmpty: true}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	head, err := anonymous.ResolveCommit(ctx, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	commit, err := anonymous.CommitInfo(ctx, head)
+	if err != nil {
+		t.Fatalf("commit info: %v", err)
+	}
+	// The identity proves which HOME the subprocess actually read.
+	if commit.AuthorName != isolatedName {
+		t.Fatalf("author %q, want the isolated identity %q", commit.AuthorName, isolatedName)
+	}
+
+	// The credential is gone, and its value is still scrubbed from output.
+	if got := anonymous.Redactor().String("a line mentioning " + token); strings.Contains(got, token) {
+		t.Fatal("the redactor forgot a credential the runner can no longer see")
+	}
+}
+
+// TestAnonymousIgnoresLaterProcessEnvironmentChanges proves the inherited
+// values are the ones read when the runner was built.
+//
+// Anonymous used to rebuild the environment by reading the process again, so a
+// value that changed in between would take effect at the moment credentials
+// were stripped, which is the one moment a run must not change behaviour.
+func TestAnonymousIgnoresLaterProcessEnvironmentChanges(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+
+	first := t.TempDir()
+	const constructedName = "Constructed Identity"
+	if err := os.WriteFile(filepath.Join(first, ".gitconfig"),
+		[]byte("[user]\n\tname = "+constructedName+"\n\temail = first@example.invalid\n"), 0o600); err != nil {
+		t.Fatalf("write configuration: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(first, ".gitconfig"))
+
+	runner, err := gitcli.New(ctx, gitcli.Options{
+		Dir:     dir,
+		Inherit: []string{"PATH", "GIT_CONFIG_GLOBAL"},
+		Env:     []string{"SOAPBOX_TOKEN=value"},
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	// The process moves on after the runner was built.
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(second, ".gitconfig"),
+		[]byte("[user]\n\tname = Later Identity\n\temail = later@example.invalid\n"), 0o600); err != nil {
+		t.Fatalf("write configuration: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(second, ".gitconfig"))
+
+	anonymous := runner.Anonymous()
+	if err := anonymous.InitRepository(ctx, "main"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := anonymous.Commit(ctx, gitcli.CommitOptions{Message: "chore: snapshot\n", AllowEmpty: true}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	head, err := anonymous.ResolveCommit(ctx, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	commit, err := anonymous.CommitInfo(ctx, head)
+	if err != nil {
+		t.Fatalf("commit info: %v", err)
+	}
+	if commit.AuthorName != constructedName {
+		t.Fatalf("author %q, want the value inherited when the runner was built, %q",
+			commit.AuthorName, constructedName)
 	}
 }
 
