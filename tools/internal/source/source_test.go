@@ -78,8 +78,8 @@ func newUpstream(ctx context.Context, t *testing.T) *upstream {
 		Tree:      tree,
 		Parents:   []string{up.mainOne, up.feature},
 		Message:   "Merge rule resolver\n",
-		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail},
-		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail},
+		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "1700000000 +0000"},
+		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "1700000000 +0000"},
 	})
 	if err != nil {
 		t.Fatalf("write merge commit: %v", err)

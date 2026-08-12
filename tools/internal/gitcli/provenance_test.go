@@ -41,7 +41,7 @@ func evilUpstream(t *testing.T, up *upstream) (dir, commit string) {
 	if err != nil {
 		t.Fatalf("resolve tree: %v", err)
 	}
-	identity := gitcli.Signature{Name: testUserName, Email: testUserEmail}
+	identity := gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate}
 	commit, err = git.WriteCommit(ctx, gitcli.CommitTreeOptions{
 		Tree:      tree,
 		Parents:   []string{head},

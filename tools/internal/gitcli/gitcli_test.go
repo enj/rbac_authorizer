@@ -16,6 +16,7 @@ import (
 const (
 	testUserName  = "Soapbox Test"
 	testUserEmail = "test@example.com"
+	testRawDate   = "1700000000 +0000"
 )
 
 func TestRunnerVersion(t *testing.T) {

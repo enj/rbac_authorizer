@@ -206,7 +206,7 @@ func TestMergeBasesReportsCrissCrossAmbiguity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve tree: %v", err)
 	}
-	author := gitcli.Signature{Name: testUserName, Email: testUserEmail}
+	author := gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate}
 	first, err := git.WriteCommit(ctx, gitcli.CommitTreeOptions{
 		Tree: tree, Parents: []string{left, right}, Message: "Merge left first\n",
 		Author: author, Committer: author,
@@ -259,8 +259,8 @@ func TestMergeBaseWithoutCommonAncestor(t *testing.T) {
 	orphan, err := git.WriteCommit(ctx, gitcli.CommitTreeOptions{
 		Tree:      tree,
 		Message:   "unrelated history\n",
-		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail},
-		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail},
+		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate},
+		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate},
 	})
 	if err != nil {
 		t.Fatalf("write orphan commit: %v", err)

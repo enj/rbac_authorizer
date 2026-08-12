@@ -72,6 +72,12 @@ func (f *sourceFixture) checkout(ctx context.Context, t *testing.T, revision str
 	}
 }
 
+// fixtureDate is the date the merge fixture records, in git's raw form. Writing
+// a commit object takes the date exactly as git stores it rather than in one of
+// the friendlier formats git's date parser accepts, and a fixed value keeps the
+// fixture's object names stable across runs.
+const fixtureDate = "1700000000 +0000"
+
 // merge writes a merge commit whose tree is the first parent's, which is enough
 // to make the topology real without needing a content merge.
 func (f *sourceFixture) merge(ctx context.Context, t *testing.T, first, second string) string {
@@ -80,12 +86,13 @@ func (f *sourceFixture) merge(ctx context.Context, t *testing.T, first, second s
 	if err != nil {
 		t.Fatalf("resolve tree: %v", err)
 	}
+	signature := gitcli.Signature{Name: fixtureUserName, Email: fixtureUserEmail, Date: fixtureDate}
 	commit, err := f.repo.Git.WriteCommit(ctx, gitcli.CommitTreeOptions{
 		Tree:      tree,
 		Parents:   []string{first, second},
 		Message:   "Merge side work\n",
-		Author:    gitcli.Signature{Name: fixtureUserName, Email: fixtureUserEmail},
-		Committer: gitcli.Signature{Name: fixtureUserName, Email: fixtureUserEmail},
+		Author:    signature,
+		Committer: signature,
 	})
 	if err != nil {
 		t.Fatalf("write merge commit: %v", err)

@@ -153,17 +153,17 @@ const (
 // EmptyTree reports the empty tree object name for this repository's hash
 // algorithm, which is what a comparison "against nothing" needs to name.
 func (r *Runner) EmptyTree(ctx context.Context) (string, error) {
-	out, err := r.run(ctx, "rev-parse", "--show-object-format")
+	format, err := r.ObjectFormat(ctx)
 	if err != nil {
-		return "", fmt.Errorf("git object format: %w", err)
+		return "", err
 	}
-	switch format := strings.TrimSpace(out); format {
-	case "sha1":
+	switch format {
+	case ObjectFormatSHA1:
 		return emptyTreeSHA1, nil
-	case "sha256":
+	case ObjectFormatSHA256:
 		return emptyTreeSHA256, nil
 	default:
-		return "", fmt.Errorf("git object format: unsupported format %q", format)
+		return "", fmt.Errorf("git object format: unsupported format %q", string(format))
 	}
 }
 
@@ -392,6 +392,13 @@ func (r *Runner) ObjectInfoBatch(ctx context.Context, opts ObjectInfoOptions) ([
 		switch {
 		case len(fields) >= 2 && fields[len(fields)-1] == "missing":
 			infos = append(infos, ObjectInfo{Name: fields[0], Missing: true})
+		case len(fields) >= 2 && fields[len(fields)-1] == "ambiguous":
+			// Git found more than one object the request could mean and declined
+			// to choose. Reading that as absent would be the dangerous answer: a
+			// caller deciding what it still has to write would write under a name
+			// that already means two things, and the one it then reads back need
+			// not be the one it wrote.
+			return nil, fmt.Errorf("git object info: %q: %w", fields[0], ErrObjectAmbiguous)
 		case len(fields) == 3:
 			size, err := strconv.ParseInt(fields[2], 10, 64)
 			if err != nil {

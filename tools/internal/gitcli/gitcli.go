@@ -472,9 +472,21 @@ func (r *Runner) runInput(ctx context.Context, stdin []byte, extraEnv []string, 
 //
 // Standard error and every error this returns are still redacted, because those
 // are diagnostics rather than content.
+//
+// The output limit still applies. Not redacting is a decision about what the
+// bytes say, not about how many of them this process will hold: a blob and a tag
+// message are upstream input, so reading them unbounded would let the repository
+// being replayed decide how much memory the engine allocates. A stream that
+// reaches the limit is reported rather than returned short, for the reason
+// runCapture gives.
 func (r *Runner) runRaw(ctx context.Context, stdin []byte, args ...string) (string, error) {
-	var stdout bytes.Buffer
-	_, err := r.runOutput(ctx, stdin, nil, &stdout, args...)
+	stdout := &boundedBuffer{limit: r.outputLimit}
+	_, err := r.runOutput(ctx, stdin, nil, stdout, args...)
+	if err == nil {
+		if err = stdout.overflow("standard output"); err != nil {
+			err = fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), err)
+		}
+	}
 	return stdout.String(), err
 }
 

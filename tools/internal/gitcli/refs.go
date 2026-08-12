@@ -84,17 +84,36 @@ type CommitTreeOptions struct {
 // reproduce a graph exactly: parents are stated rather than inferred from HEAD,
 // identity travels through the environment, and nothing depends on the state of
 // a work tree that another step may have changed.
+//
+// Every input is pinned to what the commit will record. The tree and the parents
+// must be full object names, because a revision git would resolve, HEAD or a
+// branch or an abbreviation, makes the written commit depend on the repository's
+// current state rather than on what the caller described. Both identities must
+// be complete, because git fills a missing name or address in from the
+// environment and would attribute the commit to whoever happened to run it. The
+// reported name is checked for the reason WriteTree checks its own.
+//
+// Dates use Git's raw form as well. An omitted date makes commit-tree record the
+// wall clock, while a friendly date string asks Git to reinterpret caller input;
+// either would make the object name depend on when or where this runs rather than
+// only on the fields supplied here.
 func (r *Runner) WriteCommit(ctx context.Context, opts CommitTreeOptions) (string, error) {
-	if err := validateArgument("tree", opts.Tree); err != nil {
-		return "", fmt.Errorf("git commit-tree: %w", err)
+	if !isObjectName(opts.Tree) {
+		return "", fmt.Errorf("git commit-tree: tree %q must be a full object name", opts.Tree)
 	}
 	if opts.Message == "" {
 		return "", errors.New("git commit-tree: a message is required")
 	}
+	if err := validateIdentity(opts.Author); err != nil {
+		return "", fmt.Errorf("git commit-tree: author: %w", err)
+	}
+	if err := validateIdentity(opts.Committer); err != nil {
+		return "", fmt.Errorf("git commit-tree: committer: %w", err)
+	}
 	args := []string{"commit-tree", "--no-gpg-sign"}
-	for _, parent := range opts.Parents {
-		if err := validateRevision(parent); err != nil {
-			return "", fmt.Errorf("git commit-tree: %w", err)
+	for i, parent := range opts.Parents {
+		if !isObjectName(parent) {
+			return "", fmt.Errorf("git commit-tree: parent %d %q must be a full object name", i, parent)
 		}
 		args = append(args, "-p", parent)
 	}
@@ -109,8 +128,8 @@ func (r *Runner) WriteCommit(ctx context.Context, opts CommitTreeOptions) (strin
 		return "", fmt.Errorf("git commit-tree: %w", err)
 	}
 	commit := strings.TrimSpace(out)
-	if commit == "" {
-		return "", errors.New("git commit-tree: no object name was reported")
+	if !isObjectName(commit) {
+		return "", fmt.Errorf("git commit-tree: %q is not an object name", commit)
 	}
 	return commit, nil
 }
@@ -133,6 +152,14 @@ type TagOptions struct {
 // CreateTag creates an annotated or lightweight tag. Replacing an existing tag
 // is not possible here: published tags are immutable, so a name that already
 // exists fails rather than moving.
+//
+// An annotated message is preserved byte for byte. Git's default cleanup for a
+// supplied message strips trailing whitespace, collapses trailing blank lines,
+// and deletes every line beginning with a hash, so an upstream release note that
+// happened to contain one would be published with that line missing and the tag
+// would not be the one it claims to reproduce. The message also travels on
+// standard input, which keeps a message beginning with a dash out of the
+// argument vector.
 func (r *Runner) CreateTag(ctx context.Context, opts TagOptions) error {
 	if err := ValidateBranchName(opts.Name); err != nil {
 		return fmt.Errorf("git tag: %w", err)
@@ -140,15 +167,17 @@ func (r *Runner) CreateTag(ctx context.Context, opts TagOptions) error {
 	if err := validateRevision(opts.Commit); err != nil {
 		return fmt.Errorf("git tag: %w", err)
 	}
+	var message []byte
 	args := []string{"tag"}
 	if opts.Message != "" {
-		args = append(args, "--annotate", "--message", opts.Message)
+		args = append(args, "--annotate", "--cleanup=verbatim", "--file=-")
+		message = []byte(opts.Message)
 	}
 	args = append(args, "--end-of-options", opts.Name, opts.Commit)
 
 	// An annotated tag records its tagger from the committer identity and date,
 	// so there is no separate author role to set here.
-	if _, err := r.runWith(ctx, opts.Tagger.env("COMMITTER"), args...); err != nil {
+	if _, err := r.runInput(ctx, message, opts.Tagger.env("COMMITTER"), args...); err != nil {
 		return fmt.Errorf("git tag %q: %w", opts.Name, err)
 	}
 	return nil

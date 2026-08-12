@@ -37,7 +37,7 @@ func TestChangedPathsFromEmptyTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve tree: %v", err)
 	}
-	identity := gitcli.Signature{Name: testUserName, Email: testUserEmail}
+	identity := gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate}
 	merge, err := repo.Git.WriteCommit(ctx, gitcli.CommitTreeOptions{
 		Tree:      tree,
 		Parents:   []string{child, side},

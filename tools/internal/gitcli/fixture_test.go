@@ -113,8 +113,8 @@ func (u *upstream) merge(ctx context.Context, t *testing.T, first, second string
 		Tree:      tree,
 		Parents:   []string{first, second},
 		Message:   "Merge rule resolver\n",
-		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail},
-		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail},
+		Author:    gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate},
+		Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate},
 	})
 	if err != nil {
 		t.Fatalf("write merge commit: %v", err)
