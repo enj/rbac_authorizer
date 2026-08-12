@@ -114,6 +114,28 @@ func DefaultRules() DirectiveRules {
 	}}
 }
 
+// ParseDirective reads a directive out of a comment, reporting whether the
+// comment is one.
+//
+// It is exported so the analyses that reason about markers before a rewrite
+// runs read them with exactly the parser that will later act on them. A second
+// implementation elsewhere would eventually disagree about what counts as a
+// directive, and the two disagreements that matter are both silent: an analysis
+// could report a marker as stripped that the rewrite keeps, or miss one the
+// rewrite removes.
+func ParseDirective(text string) (Directive, bool) { return parseDirective(text) }
+
+// RemovesWhenDangling reports whether the rules remove a directive with this
+// key once its target is pruned.
+//
+// The type policy needs this to describe behaviour changes truthfully. A
+// marker naming a pruned package is only a change if the rewrite actually
+// removes it, and DefaultRules keeps some of them deliberately, such as the
+// external types marker that points at a package which is never relocated.
+func (r DirectiveRules) RemovesWhenDangling(key string) bool {
+	return r.ruleFor(key).RemoveWhenDangling
+}
+
 // parseDirective reads a directive out of a comment.
 //
 // A toolchain directive has no space between the slashes and its name, which is
