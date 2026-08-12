@@ -1222,6 +1222,155 @@ func (r *Runner) Push(ctx context.Context, remote string, refspecs ...string) er
 	return nil
 }
 
+// PushUpdate is one ref update in an atomic push, bound to the value the caller
+// expects the destination to hold at the moment the push runs.
+type PushUpdate struct {
+	// Ref is the fully qualified destination ref.
+	Ref string
+	// New is the full object name the ref must end up holding.
+	New string
+	// ExpectedOld is the full object name the destination must currently hold.
+	ExpectedOld string
+	// ExpectAbsent states that the ref must not exist yet. It is separate from
+	// an empty ExpectedOld so that "it must not exist" cannot be spelled by
+	// forgetting to say anything.
+	ExpectAbsent bool
+}
+
+// PushAtomic updates remote refs in one transaction, guarding every ref with a
+// compare and swap against the value the caller expects it to hold.
+//
+// Push lets git reject anything that is not a fast forward, and a fast forward
+// check is not the same guarantee as a compare and swap. Between reading a
+// remote and pushing to it, another writer can advance a branch to a commit
+// this push then fast forwards straight over. Git is satisfied, and what lands
+// is not the update that was reviewed, because the value it was reviewed
+// against is gone. Naming the expected value moves the comparison into the ref
+// transaction on the far side, where nothing can race it.
+//
+// The lease is a compare and swap rather than a licence to force. With a
+// matching lease git will accept a rewind, so this is where the fast forward
+// rule is kept instead: every update naming an expected value is proved to
+// descend from it before the subprocess starts, and refused otherwise. The
+// empty lease is git's own spelling of "this ref must not exist yet", which is
+// what keeps a create from quietly becoming an update to whatever appeared in
+// the meantime.
+//
+// Deleting remains impossible. Every update names an object it moves to, and
+// the null object name git's protocol spells a deletion with is refused.
+func (r *Runner) PushAtomic(ctx context.Context, remote string, updates []PushUpdate) error {
+	if err := ValidatePushRemote(remote); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	if len(updates) == 0 {
+		return fmt.Errorf("git push: at least one update is required")
+	}
+	seen := make(map[string]bool, len(updates))
+	leases := make([]string, 0, len(updates))
+	refspecs := make([]string, 0, len(updates))
+	for i, update := range updates {
+		if err := validatePushUpdate(update); err != nil {
+			return fmt.Errorf("git push: update %d: %w", i, err)
+		}
+		if seen[update.Ref] {
+			return fmt.Errorf("git push: update %d: ref %q appears more than once", i, update.Ref)
+		}
+		seen[update.Ref] = true
+		if err := r.assertFastForward(ctx, update); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
+		// The lease is keyed by the destination ref, and an empty expected
+		// value is the form that requires the ref to be absent.
+		leases = append(leases, "--force-with-lease="+update.Ref+":"+update.ExpectedOld)
+		refspecs = append(refspecs, update.New+":"+update.Ref)
+	}
+	// The refspecs are held to the same rules a caller written one is, so the
+	// one construction site inside this package is not the one that gets to
+	// skip them.
+	for _, spec := range refspecs {
+		if err := ValidatePushRefspec(spec); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
+	}
+	if err := r.assertNoRemoteRewrites(ctx); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+
+	args := []string{"-c", "credential.helper=", "push", "--atomic", "--porcelain", "--no-verify"}
+	args = append(args, leases...)
+	args = append(args, "--", remote)
+	out, err := r.run(ctx, append(args, refspecs...)...)
+	if err != nil {
+		if verdict := rejectedRef(out); verdict != "" {
+			return fmt.Errorf("git push to %q: %s: %w", redactRemote(remote), verdict, err)
+		}
+		return fmt.Errorf("git push to %q: %w", redactRemote(remote), err)
+	}
+	return nil
+}
+
+// assertFastForward proves that an update naming an expected value moves
+// forward from it.
+//
+// The lease replaces git's own fast forward check rather than adding to it, so
+// the rule has to be kept here. An update whose expected value is not in this
+// repository is refused for the same reason: nothing can be proved about a
+// history that is not present, and the lease alone would let the push rewind
+// the ref.
+func (r *Runner) assertFastForward(ctx context.Context, update PushUpdate) error {
+	if update.ExpectedOld == "" {
+		return nil
+	}
+	forward, err := r.IsAncestor(ctx, update.ExpectedOld, update.New)
+	if err != nil {
+		return fmt.Errorf("%q: %w", update.Ref, err)
+	}
+	if !forward {
+		return fmt.Errorf("%q: %s does not descend from %s: %w", update.Ref, update.New, update.ExpectedOld, ErrForceRefspec)
+	}
+	return nil
+}
+
+// validatePushUpdate checks one update of an atomic push.
+func validatePushUpdate(update PushUpdate) error {
+	// A leading plus is git's force marker. It cannot survive into a refspec
+	// this package builds, but a caller that wrote one meant to force, and
+	// answering that intent with a silent fast forward would hide the
+	// disagreement rather than settle it.
+	if strings.HasPrefix(update.Ref, "+") {
+		return fmt.Errorf("ref %q: %w", update.Ref, ErrForceRefspec)
+	}
+	if err := ValidateRefName(update.Ref); err != nil {
+		return err
+	}
+	if err := validatePushObject("new object", update.New); err != nil {
+		return fmt.Errorf("ref %q: %w", update.Ref, err)
+	}
+	switch {
+	case update.ExpectAbsent && update.ExpectedOld != "":
+		return fmt.Errorf("ref %q cannot both expect no ref and expect object %s", update.Ref, update.ExpectedOld)
+	case !update.ExpectAbsent && update.ExpectedOld == "":
+		return fmt.Errorf("ref %q must state the value the remote is expected to hold, or that it must not exist", update.Ref)
+	case update.ExpectedOld != "":
+		if err := validatePushObject("expected object", update.ExpectedOld); err != nil {
+			return fmt.Errorf("ref %q: %w", update.Ref, err)
+		}
+	}
+	return nil
+}
+
+// validatePushObject rejects anything that is not a full object name, and the
+// null object name, which is how git's protocol spells a deletion.
+func validatePushObject(kind, name string) error {
+	if !isObjectName(name) {
+		return fmt.Errorf("%s %q must be a full object name", kind, name)
+	}
+	if strings.Trim(name, "0") == "" {
+		return fmt.Errorf("%s is the null object name: %w", kind, ErrDeleteRefspec)
+	}
+	return nil
+}
+
 // assertNoRemoteRewrites fails closed when configuration this repository can
 // see would silently redirect a command that names a remote explicitly.
 //
