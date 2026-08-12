@@ -1,0 +1,1048 @@
+{
+  "Policy": "copy-approved",
+  "Candidates": [
+    {
+      "ImportPath": "k8s.io/apiserver/pkg/authentication/user",
+      "StagingPath": "staging/src/k8s.io/apiserver/pkg/authentication/user",
+      "Module": "k8s.io/apiserver",
+      "Proposed": true,
+      "Action": "external",
+      "Gates": [
+        {
+          "Name": "interoperability",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 1,
+          "Limit": 0,
+          "Unit": "boundary types",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "blocks: k8s.io/apiserver/pkg/authentication/user.Info (interface) reached by monis.app/kk/rbac_authorizer.AuthorizationRuleResolver -> method RulesFor -> parameter subject -> k8s.io/apiserver/pkg/authentication/user.Info; a relocated interface is a distinct type, so a consumer holding the real one cannot pass it across the boundary"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "globalState",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "state findings",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "diamond",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 1,
+          "Limit": 0,
+          "Unit": "retained reachers",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "k8s.io/apiserver/pkg/authorization/authorizerfactory imports k8s.io/apiserver/pkg/authentication/user; the retained package still imports the original, so the consumer build contains both the copy and the package it was copied from"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "closureCompleteness",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "unsatisfied imports",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxCopiedPackages",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "packages across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxCopiedLines",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "lines across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxGeneratedFiles",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "generated files across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxDistinctLicenses",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "distinct verified licences across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "Apache-2.0",
+            "Google-Patent-Grant"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "maxModuleZipBytes",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "zip bytes across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxReleasesPerMinor",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "releases in the source minor",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "securityCritical",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "security critical packages",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "path segment authentication means owning a copy also means owning its CVE response, which reaches consumers only when this engine republishes"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "nativeCode",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "native inputs",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "minimumLeverage",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "modules removed from the consumer build",
+          "Minimum": true,
+          "Unmeasured": false,
+          "Evidence": [
+            "the copy would remove 0 modules, 0 compiled packages, and 0 compiled lines from the consumer build"
+          ],
+          "Override": null
+        }
+      ],
+      "Score": {
+        "CopiedFiles": 1,
+        "CopiedLines": 22,
+        "GeneratedFiles": 0,
+        "NativeFiles": 0,
+        "Cgo": false,
+        "LicenseIdentifiers": [
+          "Apache-2.0",
+          "Google-Patent-Grant"
+        ],
+        "LicensesVerified": true,
+        "SecurityCriticalSegment": "authentication",
+        "ClosureGaps": null,
+        "ModuleZipBytes": 2830000,
+        "ZipBytesKnown": true,
+        "ReleasesPerMinor": 9,
+        "CadenceKnown": true,
+        "ModulesRemoved": [
+          "k8s.io/apiserver",
+          "k8s.io/component-base"
+        ],
+        "PackagesRemoved": 1,
+        "LinesRemoved": 120
+      }
+    },
+    {
+      "ImportPath": "k8s.io/apiserver/pkg/authorization/authorizer",
+      "StagingPath": "staging/src/k8s.io/apiserver/pkg/authorization/authorizer",
+      "Module": "k8s.io/apiserver",
+      "Proposed": true,
+      "Action": "external",
+      "Gates": [
+        {
+          "Name": "interoperability",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 2,
+          "Limit": 0,
+          "Unit": "boundary types",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "blocks: k8s.io/apiserver/pkg/authorization/authorizer.Attributes (interface) reached by monis.app/kk/rbac_authorizer.New -> result 0 -> * -> monis.app/kk/rbac_authorizer.RBACAuthorizer -> method Authorize -> parameter attrs -> k8s.io/apiserver/pkg/authorization/authorizer.Attributes; the transitive method set reaches candidate owned type k8s.io/apiserver/pkg/authentication/user.Info, which would be relocated with it",
+            "blocks: k8s.io/apiserver/pkg/authorization/authorizer.Decision (basic) reached by monis.app/kk/rbac_authorizer.New -> result 0 -> * -> monis.app/kk/rbac_authorizer.RBACAuthorizer -> method Authorize -> result 0 -> k8s.io/apiserver/pkg/authorization/authorizer.Decision; Go type identity is nominal, so a relocated declaration is a different type from the one a consumer already holds"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "globalState",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "state findings",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "diamond",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 2,
+          "Limit": 0,
+          "Unit": "retained reachers",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "k8s.io/apiserver/pkg/authorization/authorizerfactory imports k8s.io/apiserver/pkg/authorization/authorizer; the retained package still imports the original, so the consumer build contains both the copy and the package it was copied from",
+            "the generated module must satisfy Authorizer from this package, so the original cannot leave the build"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "closureCompleteness",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "unsatisfied imports",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxCopiedPackages",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "packages across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxCopiedLines",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "lines across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxGeneratedFiles",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "generated files across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxDistinctLicenses",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "distinct verified licences across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "Apache-2.0",
+            "Google-Patent-Grant"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "maxModuleZipBytes",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "zip bytes across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxReleasesPerMinor",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "releases in the source minor",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "securityCritical",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "security critical packages",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "path segment authorization means owning a copy also means owning its CVE response, which reaches consumers only when this engine republishes"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "nativeCode",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "native inputs",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "minimumLeverage",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "modules removed from the consumer build",
+          "Minimum": true,
+          "Unmeasured": false,
+          "Evidence": [
+            "the copy would remove 0 modules, 0 compiled packages, and 0 compiled lines from the consumer build"
+          ],
+          "Override": null
+        }
+      ],
+      "Score": {
+        "CopiedFiles": 1,
+        "CopiedLines": 30,
+        "GeneratedFiles": 0,
+        "NativeFiles": 0,
+        "Cgo": false,
+        "LicenseIdentifiers": [
+          "Apache-2.0",
+          "Google-Patent-Grant"
+        ],
+        "LicensesVerified": true,
+        "SecurityCriticalSegment": "authorization",
+        "ClosureGaps": null,
+        "ModuleZipBytes": 2830000,
+        "ZipBytesKnown": true,
+        "ReleasesPerMinor": 9,
+        "CadenceKnown": true,
+        "ModulesRemoved": [
+          "k8s.io/apiserver",
+          "k8s.io/component-base"
+        ],
+        "PackagesRemoved": 1,
+        "LinesRemoved": 120
+      }
+    },
+    {
+      "ImportPath": "k8s.io/apiserver/pkg/endpoints/request",
+      "StagingPath": "staging/src/k8s.io/apiserver/pkg/endpoints/request",
+      "Module": "k8s.io/apiserver",
+      "Proposed": true,
+      "Action": "external",
+      "Gates": [
+        {
+          "Name": "interoperability",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "boundary types",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "globalState",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 5,
+          "Limit": 0,
+          "Unit": "state findings",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "contextKey: context.WithValue at $FIXTURE/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go:26:17; a relocated context key type is a distinct key, so values stored by the real package read as absent instead of failing",
+            "contextKey: context.WithValue at $FIXTURE/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go:37:17; a relocated context key type is a distinct key, so values stored by the real package read as absent instead of failing",
+            "contextKey: k8s.io/apiserver/pkg/endpoints/request.requestInfoKeyType at $FIXTURE/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go:9:6; a context value is keyed by the key's type identity, so a relocated unexported key type reads back as absent rather than failing",
+            "contextKey: k8s.io/apiserver/pkg/endpoints/request.userKeyType at $FIXTURE/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go:13:6; a context value is keyed by the key's type identity, so a relocated unexported key type reads back as absent rather than failing",
+            "deniedPath: k8s.io/apiserver/pkg/endpoints/request; the package owns the request context keys, whose identity is the type and does not survive relocation"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "diamond",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "retained reachers",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "closureCompleteness",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "unsatisfied imports",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxCopiedPackages",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "packages across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxCopiedLines",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "lines across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxGeneratedFiles",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "generated files across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxDistinctLicenses",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "distinct verified licences across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "Apache-2.0",
+            "Google-Patent-Grant"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "maxModuleZipBytes",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "zip bytes across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxReleasesPerMinor",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "releases in the source minor",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "securityCritical",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "security critical packages",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "nativeCode",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "native inputs",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "minimumLeverage",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "modules removed from the consumer build",
+          "Minimum": true,
+          "Unmeasured": false,
+          "Evidence": [
+            "the copy would remove 0 modules, 0 compiled packages, and 0 compiled lines from the consumer build"
+          ],
+          "Override": null
+        }
+      ],
+      "Score": {
+        "CopiedFiles": 1,
+        "CopiedLines": 44,
+        "GeneratedFiles": 0,
+        "NativeFiles": 0,
+        "Cgo": false,
+        "LicenseIdentifiers": [
+          "Apache-2.0",
+          "Google-Patent-Grant"
+        ],
+        "LicensesVerified": true,
+        "SecurityCriticalSegment": "",
+        "ClosureGaps": null,
+        "ModuleZipBytes": 2830000,
+        "ZipBytesKnown": true,
+        "ReleasesPerMinor": 9,
+        "CadenceKnown": true,
+        "ModulesRemoved": [
+          "k8s.io/apiserver",
+          "k8s.io/component-base"
+        ],
+        "PackagesRemoved": 1,
+        "LinesRemoved": 120
+      }
+    },
+    {
+      "ImportPath": "k8s.io/apiserver/pkg/features",
+      "StagingPath": "staging/src/k8s.io/apiserver/pkg/features",
+      "Module": "k8s.io/apiserver",
+      "Proposed": true,
+      "Action": "external",
+      "Gates": [
+        {
+          "Name": "interoperability",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "boundary types",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "globalState",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 4,
+          "Limit": 0,
+          "Unit": "state findings",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "deniedPath: k8s.io/apiserver/pkg/features; the package registers the apiserver feature gates into a process global gate at initialisation",
+            "featureGate: k8s.io/component-base/featuregate.NewFeatureGate at $FIXTURE/k8s.io/apiserver/pkg/features/kube_features.go:11:45; a relocated feature gate is never wired to flag parsing and silently keeps its defaults",
+            "initSideEffect: k8s.io/apiserver/pkg/features.init at $FIXTURE/k8s.io/apiserver/pkg/features/kube_features.go:17:1; an init function calls k8s.io/component-base/featuregate.Add at import time, which registers into state the relocated copy does not share",
+            "mutableSingleton: k8s.io/apiserver/pkg/features.DefaultMutableFeatureGate at $FIXTURE/k8s.io/apiserver/pkg/features/kube_features.go:11:5; an exported package variable is shared state, and a second copy of it never sees the writes made to the first"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "diamond",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "retained reachers",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "closureCompleteness",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "unsatisfied imports",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxCopiedPackages",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "packages across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxCopiedLines",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "lines across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxGeneratedFiles",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "generated files across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxDistinctLicenses",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "distinct verified licences across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "Apache-2.0",
+            "Google-Patent-Grant"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "maxModuleZipBytes",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "zip bytes across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxReleasesPerMinor",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "releases in the source minor",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "securityCritical",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "security critical packages",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "nativeCode",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "native inputs",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "minimumLeverage",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "modules removed from the consumer build",
+          "Minimum": true,
+          "Unmeasured": false,
+          "Evidence": [
+            "the copy would remove 0 modules, 0 compiled packages, and 0 compiled lines from the consumer build"
+          ],
+          "Override": null
+        }
+      ],
+      "Score": {
+        "CopiedFiles": 1,
+        "CopiedLines": 19,
+        "GeneratedFiles": 0,
+        "NativeFiles": 0,
+        "Cgo": false,
+        "LicenseIdentifiers": [
+          "Apache-2.0",
+          "Google-Patent-Grant"
+        ],
+        "LicensesVerified": true,
+        "SecurityCriticalSegment": "",
+        "ClosureGaps": null,
+        "ModuleZipBytes": 2830000,
+        "ZipBytesKnown": true,
+        "ReleasesPerMinor": 9,
+        "CadenceKnown": true,
+        "ModulesRemoved": [
+          "k8s.io/apiserver",
+          "k8s.io/component-base"
+        ],
+        "PackagesRemoved": 1,
+        "LinesRemoved": 120
+      }
+    },
+    {
+      "ImportPath": "k8s.io/component-base/featuregate",
+      "StagingPath": "staging/src/k8s.io/component-base/featuregate",
+      "Module": "k8s.io/component-base",
+      "Proposed": true,
+      "Action": "external",
+      "Gates": [
+        {
+          "Name": "interoperability",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "boundary types",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "globalState",
+          "Kind": "correctness",
+          "Passed": false,
+          "Measured": 1,
+          "Limit": 0,
+          "Unit": "state findings",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "deniedPath: k8s.io/component-base/featuregate; the package defines the feature gate machinery whose instances are process global"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "diamond",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "retained reachers",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "closureCompleteness",
+          "Kind": "correctness",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "unsatisfied imports",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxCopiedPackages",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "packages across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxCopiedLines",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "lines across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": {
+            "Justification": "the compiled subset is small, so the copy looks cheap",
+            "Approver": "release-approver",
+            "ExpiresAfterMinor": 40
+          }
+        },
+        {
+          "Name": "maxGeneratedFiles",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "generated files across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxDistinctLicenses",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "distinct verified licences across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": [
+            "Apache-2.0"
+          ],
+          "Override": null
+        },
+        {
+          "Name": "maxModuleZipBytes",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "zip bytes across the accepted copy",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "maxReleasesPerMinor",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "releases in the source minor",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "securityCritical",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "security critical packages",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "nativeCode",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "native inputs",
+          "Minimum": false,
+          "Unmeasured": false,
+          "Evidence": null,
+          "Override": null
+        },
+        {
+          "Name": "minimumLeverage",
+          "Kind": "cost",
+          "Passed": true,
+          "Measured": 0,
+          "Limit": 0,
+          "Unit": "modules removed from the consumer build",
+          "Minimum": true,
+          "Unmeasured": false,
+          "Evidence": [
+            "the copy would remove 0 modules, 0 compiled packages, and 0 compiled lines from the consumer build"
+          ],
+          "Override": null
+        }
+      ],
+      "Score": {
+        "CopiedFiles": 1,
+        "CopiedLines": 28,
+        "GeneratedFiles": 0,
+        "NativeFiles": 0,
+        "Cgo": false,
+        "LicenseIdentifiers": [
+          "Apache-2.0"
+        ],
+        "LicensesVerified": true,
+        "SecurityCriticalSegment": "",
+        "ClosureGaps": null,
+        "ModuleZipBytes": 1120000,
+        "ZipBytesKnown": true,
+        "ReleasesPerMinor": 9,
+        "CadenceKnown": true,
+        "ModulesRemoved": [
+          "k8s.io/apiserver",
+          "k8s.io/component-base"
+        ],
+        "PackagesRemoved": 1,
+        "LinesRemoved": 120
+      }
+    }
+  ],
+  "Copy": null,
+  "Totals": {
+    "Candidates": 5,
+    "Copied": 0,
+    "Refused": 5,
+    "CopiedLines": 0,
+    "ModulesRemoved": 0
+  }
+}

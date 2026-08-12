@@ -33,6 +33,17 @@ var (
 	correctnessGate = []string{"diamond", "globalState", "interoperability"}
 )
 
+// CostGateNames returns the gate names an override may relax.
+//
+// It is exported so the package that evaluates these gates can be tested
+// against the profile schema's actual vocabulary rather than against a copy of
+// it. The two lists live in different packages on purpose, and a copied literal
+// in a test would keep passing while they drifted apart.
+func CostGateNames() []string { return slices.Clone(costGates) }
+
+// CorrectnessGateNames returns the gate names no override may relax.
+func CorrectnessGateNames() []string { return slices.Clone(correctnessGate) }
+
 // ValidationError reports every problem found in one profile.
 type ValidationError struct {
 	Problems []string
