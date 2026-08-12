@@ -128,13 +128,17 @@ func planCommand() command {
 	return command{name: "plan", summary: "compute the extraction plan for one upstream ref", run: runPlan}
 }
 
+func generateCommand() command {
+	return command{name: "generate", summary: "compose the generated module for one upstream release tag", run: runGenerate}
+}
+
 func helpCommand() command {
 	return command{name: "help", summary: "print usage for soapbox or one command", run: runHelp}
 }
 
 // commands are listed in the order the help output uses.
 func commands() []command {
-	return []command{doctorCommand(), validateCommand(), planCommand(), versionCommand(), helpCommand()}
+	return []command{doctorCommand(), validateCommand(), planCommand(), generateCommand(), versionCommand(), helpCommand()}
 }
 
 // Run dispatches one command line and returns the process exit code.
@@ -421,6 +425,8 @@ func runHelp(_ context.Context, env Env, args []string) error {
 			fs, _ = validateFlagSet()
 		case "plan":
 			fs, _ = planFlagSet()
+		case "generate":
+			fs, _ = generateFlagSet()
 		default:
 			fs = newFlagSet(cmd.name)
 		}

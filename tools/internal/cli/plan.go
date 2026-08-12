@@ -38,11 +38,16 @@ const (
 // silent guess.
 const releaseBranchPrefix = "release-"
 
-// planFormats are the supported plan output formats, in help order.
-var planFormats = []string{"summary", "json"}
+// runFormats are the supported plan and generate output formats, in help order.
+var runFormats = []string{"summary", "json"}
 
-// planFlags holds the parsed plan flags.
-type planFlags struct {
+// runFlags holds the flags a plan and a generation both take.
+//
+// They are one type rather than two lists that happen to agree, because the two
+// commands select the same ref, resolve the same directories, and take the same
+// network posture. A flag whose name matched across the commands while its
+// meaning drifted would be worse than either command having its own name for it.
+type runFlags struct {
 	dir          *string
 	path         *string
 	cache        *string
@@ -61,26 +66,60 @@ type planFlags struct {
 	strict       *bool
 }
 
-func planFlagSet() (*flag.FlagSet, *planFlags) {
-	fs := newFlagSet("plan")
-	return fs, &planFlags{
+// runSpec carries the parts of the shared flag surface that differ between the
+// two commands: how each one reads in a sentence about a ref, what each one
+// produces, and where each one keeps what it creates.
+type runSpec struct {
+	// verb is how the command reads in a sentence about a ref, such as "plan".
+	verb string
+	// tree names what the command produces, such as "relocated tree".
+	tree string
+	// cache is the default source cache root. An empty value makes the flag
+	// required, which is how a command that can offer no safe default says so.
+	cache string
+	// work and out describe each command's default scratch and output
+	// locations. They are described rather than set, because both flags default
+	// to empty and each command derives its own layout from the cache root it
+	// was given.
+	work string
+	out  string
+}
+
+// registerRunFlags defines the shared flags on one command's flag set.
+func registerRunFlags(fs *flag.FlagSet, spec runSpec) *runFlags {
+	cacheUsage := "source cache root, relative to -dir when not absolute"
+	if spec.cache == "" {
+		cacheUsage += " (required, and outside -dir)"
+	}
+	return &runFlags{
 		dir:          fs.String("dir", ".", "directory that holds the profile"),
 		path:         fs.String("config", config.DefaultFileName, "profile path relative to -dir"),
-		cache:        fs.String("cache", defaultCacheDir, "source cache root, relative to -dir when not absolute"),
-		work:         fs.String("work", "", "scratch root, relative to -dir when not absolute (default <cache>/"+defaultWorkDir+")"),
-		out:          fs.String("out", "", "relocated tree destination (default <work>/"+defaultOutputName+")"),
+		cache:        fs.String("cache", spec.cache, cacheUsage),
+		work:         fs.String("work", "", "scratch root, relative to -dir when not absolute (default "+spec.work+")"),
+		out:          fs.String("out", "", spec.tree+" destination (default "+spec.out+")"),
 		report:       fs.String("report", "", "also write the JSON report to this path"),
-		tag:          fs.String("tag", "", "source tag to plan (default source.refs.minimumRelease)"),
-		branch:       fs.String("branch", "", "source branch to plan, instead of a tag"),
+		tag:          fs.String("tag", "", "source tag to "+spec.verb+" (default source.refs.minimumRelease)"),
+		branch:       fs.String("branch", "", "source branch to "+spec.verb+", instead of a tag"),
 		patchBranch:  fs.String("patch-branch", "", "tracked branch patch selectors are matched against"),
 		sourceRemote: fs.String("source-remote", "", "read source history from this remote instead of the profile's"),
-		fetch:        fs.Bool("fetch", true, "update the source cache before planning"),
+		fetch:        fs.Bool("fetch", true, "update the source cache before the run"),
 		offline:      fs.Bool("offline", false, "refuse every network operation and require an existing cache"),
-		materialize:  fs.Bool("materialize", false, "write the relocated tree to -out"),
+		materialize:  fs.Bool("materialize", false, "write the "+spec.tree+" to -out"),
 		keepWorktree: fs.Bool("keep-worktree", false, "leave the materialized source tree in place"),
-		format:       fs.String("format", planFormats[0], "output format: "+strings.Join(planFormats, ", ")),
+		format:       fs.String("format", runFormats[0], "output format: "+strings.Join(runFormats, ", ")),
 		strict:       fs.Bool("strict", false, "treat advisory notices as a policy failure"),
 	}
+}
+
+func planFlagSet() (*flag.FlagSet, *runFlags) {
+	fs := newFlagSet("plan")
+	return fs, registerRunFlags(fs, runSpec{
+		verb:  "plan",
+		tree:  "relocated tree",
+		cache: defaultCacheDir,
+		work:  "<cache>/" + defaultWorkDir,
+		out:   "<work>/" + defaultOutputName,
+	})
 }
 
 // runPlan computes one extraction plan.
@@ -96,9 +135,9 @@ func runPlan(ctx context.Context, env Env, args []string) error {
 	usage := commandUsage(planCommand(), fs)
 	given := setFlags(fs)
 
-	if !slices.Contains(planFormats, *flags.format) {
+	if !slices.Contains(runFormats, *flags.format) {
 		return &usageError{
-			err:   fmt.Errorf("unsupported -format %q, want %s", *flags.format, strings.Join(planFormats, ", ")),
+			err:   fmt.Errorf("unsupported -format %q, want %s", *flags.format, strings.Join(runFormats, ", ")),
 			usage: usage,
 		}
 	}
@@ -134,11 +173,11 @@ func runPlan(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return profileError(env, paths.config, err)
 	}
-	ref, err := planRef(flags, cfg)
+	ref, err := selectedRef(flags, cfg)
 	if err != nil {
 		return &usageError{err: err, usage: usage}
 	}
-	patchBranch, err := planPatchBranch(flags, cfg, ref)
+	patchBranch, err := selectedPatchBranch(flags, cfg, ref)
 	if err != nil {
 		return &usageError{err: err, usage: usage}
 	}
@@ -171,7 +210,7 @@ func runPlan(ctx context.Context, env Env, args []string) error {
 	// one that says a finding is waiting.
 	var writeErr error
 	if result != nil {
-		writeErr = writePlanOutput(ctx, env, paths.report, *flags.format, result)
+		writeErr = writeReportOutput(ctx, env, "plan", paths.report, *flags.format, result.Report.JSON, result.Summary)
 	}
 	return planError(errors.Join(err, writeErr))
 }
@@ -214,7 +253,7 @@ type resolvedPlanPaths struct {
 // relative path means "against the process working directory" only at the point
 // the operator typed it, and the engine's containment checks are meaningless
 // against a path that could still be reinterpreted.
-func planPaths(env Env, flags *planFlags) (resolvedPlanPaths, error) {
+func planPaths(env Env, flags *runFlags) (resolvedPlanPaths, error) {
 	dir, err := filepath.Abs(env.resolve(*flags.dir))
 	if err != nil {
 		return resolvedPlanPaths{}, fmt.Errorf("resolve -dir: %w", err)
@@ -245,8 +284,8 @@ func resolveAgainst(dir, path string) string {
 	return filepath.Join(dir, path)
 }
 
-// planRef selects the single upstream ref the plan covers.
-func planRef(flags *planFlags, cfg *config.Config) (extract.Ref, error) {
+// selectedRef selects the single upstream ref the run covers.
+func selectedRef(flags *runFlags, cfg *config.Config) (extract.Ref, error) {
 	switch {
 	case *flags.branch != "":
 		return extract.Ref{Kind: extract.RefBranch, Name: *flags.branch}, nil
@@ -259,7 +298,7 @@ func planRef(flags *planFlags, cfg *config.Config) (extract.Ref, error) {
 	}
 }
 
-// planPatchBranch reports the branch a patch's branch selector is matched
+// selectedPatchBranch reports the branch a patch's branch selector is matched
 // against.
 //
 // A patch is authored against a line of development rather than against one
@@ -274,7 +313,7 @@ func planRef(flags *planFlags, cfg *config.Config) (extract.Ref, error) {
 // the wrong branch applies patches that were never meant for this release. A
 // profile that carries no patches needs no branch at all, because nothing will
 // be selected.
-func planPatchBranch(flags *planFlags, cfg *config.Config, ref extract.Ref) (string, error) {
+func selectedPatchBranch(flags *runFlags, cfg *config.Config, ref extract.Ref) (string, error) {
 	switch {
 	case *flags.patchBranch != "":
 		return *flags.patchBranch, nil
@@ -313,38 +352,43 @@ func describeBranches(branches []string) string {
 	return strings.Join(branches, ", ")
 }
 
-// writePlanOutput renders the plan to the requested stream and file.
+// writeReportOutput renders one run to the requested stream and file.
 //
 // The two renderings are the same JSON when -format json is given, so a run that
-// prints and writes cannot produce two different records of one plan. The report
+// prints and writes cannot produce two different records of one run. The report
 // is encoded only when something is going to read it: a summary run with no
 // -report has no use for the bytes, and encoding them anyway would turn an
 // encoder failure into the failure of a command that never needed the encoder.
-func writePlanOutput(ctx context.Context, env Env, reportPath, format string, result *extract.Result) error {
+//
+// The renderings arrive as functions rather than as one result type, because the
+// plan and the generation report different things and the only property this has
+// to hold for both is that the bytes printed and the bytes written are one
+// encoding rather than two.
+func writeReportOutput(ctx context.Context, env Env, command, reportPath, format string, encode func() ([]byte, error), summary func() string) error {
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("write plan output: %w", err)
+		return fmt.Errorf("write %s output: %w", command, err)
 	}
 	var encoded []byte
 	if reportPath != "" || format == "json" {
 		var err error
-		if encoded, err = result.Report.JSON(); err != nil {
+		if encoded, err = encode(); err != nil {
 			return err
 		}
 	}
 	if reportPath != "" {
 		if err := os.MkdirAll(filepath.Dir(reportPath), 0o750); err != nil {
-			return fmt.Errorf("write plan report: %w", err)
+			return fmt.Errorf("write %s report: %w", command, err)
 		}
 		if err := os.WriteFile(reportPath, encoded, 0o600); err != nil {
-			return fmt.Errorf("write plan report: %w", err)
+			return fmt.Errorf("write %s report: %w", command, err)
 		}
 	}
 	rendered := encoded
 	if format == "summary" {
-		rendered = []byte(result.Summary())
+		rendered = []byte(summary())
 	}
 	if _, err := env.Stdout.Write(rendered); err != nil {
-		return fmt.Errorf("write plan output: %w", err)
+		return fmt.Errorf("write %s output: %w", command, err)
 	}
 	return nil
 }

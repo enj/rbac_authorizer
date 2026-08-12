@@ -649,6 +649,8 @@ const planProfile = `version: 1
 source:
   repository: https://github.com/kubernetes/kubernetes.git
   importPrefix: k8s.io/kubernetes
+  project: Kubernetes
+  license: Apache-2.0
   refs:
     minimumRelease: v1.36.1
     includePrereleases: true
@@ -664,6 +666,7 @@ destination:
   progressRefPrefix: refs/soapbox/progress/
   rootPackage: fixture
   internalPrefix: internal/kk
+  summary: the Kubernetes RBAC authorizer as an independently consumable Go module.
 packages:
   roots:
     - plugin/pkg/auth/authorizer/rbac
