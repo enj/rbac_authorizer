@@ -193,8 +193,17 @@ type Options struct {
 
 // Runner executes Go commands with a controlled environment.
 type Runner struct {
-	binary      string
-	dir         string
+	binary string
+	dir    string
+	// inherited, isolation, and proxy are kept alongside the assembled
+	// environment because LoaderEnv builds a second environment from the same
+	// isolation and proxy while deliberately leaving the Env entries out of it.
+	// Recovering them from env instead would mean parsing back a list that no
+	// longer records which entry came from where, and the one entry that must
+	// not be recovered by accident is the one carrying a credential.
+	inherited   []string
+	isolation   []string
+	proxy       string
 	env         []string
 	outputLimit int64
 	redactor    *gitcli.Redactor
@@ -245,10 +254,14 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 	case limit == 0:
 		limit = DefaultOutputLimit
 	}
+	inherited := inheritedEnv(opts.Inherit)
 	return &Runner{
 		binary:      binary,
 		dir:         opts.Dir,
-		env:         assembleEnv(inheritedEnv(opts.Inherit), opts.Isolation, opts.Env, proxy),
+		inherited:   inherited,
+		isolation:   slices.Clone(opts.Isolation),
+		proxy:       proxy,
+		env:         assembleEnv(inherited, opts.Isolation, opts.Env, proxy),
 		outputLimit: limit,
 		// The proxy is seeded alongside the environment values because a proxy
 		// URL is a normal place for a token to live.

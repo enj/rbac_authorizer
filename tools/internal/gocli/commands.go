@@ -98,6 +98,62 @@ func validateEnvName(name string) error {
 	return nil
 }
 
+// loaderVariables are the Go location variables a package load must be told
+// explicitly, in the order LoaderEnv reports them.
+var loaderVariables = []string{"GOROOT", "GOCACHE", "GOMODCACHE", "GOPATH", "GOTMPDIR"}
+
+// loaderOptional are the variables an empty value is an answer for rather than
+// a gap.
+//
+// GOTMPDIR is the only one. The go command reports it empty when nothing set
+// it, and empty means "use the system temporary directory" rather than "use an
+// empty path", so writing the empty entry out would state a different
+// instruction rather than the same one made explicit.
+var loaderOptional = []string{"GOTMPDIR"}
+
+// LoaderEnv returns the complete environment a go/packages load must run under.
+//
+// A package load runs the go command, so it meets exactly the problems this
+// package exists to close, but it meets them in a process this package does not
+// start: the loader builds its own subprocess and is handed an environment
+// rather than a Runner. Anything missing from that environment is therefore not
+// defaulted here but inherited from whoever started the engine, and what it
+// decides is which code gets type checked. A public API generated against one
+// module cache and a policy decided against another is not one result, so the
+// environment is stated in full rather than grown from os.Environ.
+//
+// It is built from this runner's isolation and proxy and from the locations the
+// go command itself resolves, so a load reads the same GOROOT, build cache, and
+// module cache as every other command this runner runs. Two things are absent on
+// purpose. The Env entries are left out because they are this package's
+// credential channel and a load needs no credential of its own: the proxy URL
+// already carries whatever a module fetch requires. Ambient Go policy is left
+// out for the reason it is refused everywhere else here, and the fixed entries
+// are appended last so an inherited GOFLAGS, a workspace file, or a toolchain
+// switch cannot outrank them.
+func (r *Runner) LoaderEnv(ctx context.Context) ([]string, error) {
+	values, err := r.Env(ctx, loaderVariables...)
+	if err != nil {
+		return nil, fmt.Errorf("go loader environment: %w", err)
+	}
+	env := make([]string, 0, len(r.inherited)+len(r.isolation)+len(loaderVariables)+len(fixedEnv)+1)
+	env = append(env, r.inherited...)
+	env = append(env, r.isolation...)
+	for _, name := range loaderVariables {
+		switch value := values[name]; {
+		case value != "":
+			env = append(env, name+"="+value)
+		case !slices.Contains(loaderOptional, name):
+			// An empty required location is not a location. The go command
+			// would resolve its own default from HOME, which is the ambient
+			// state this environment exists to replace.
+			return nil, fmt.Errorf("go loader environment: %s resolved to an empty path, so a load would fall back to an ambient location", name)
+		}
+	}
+	env = append(env, fixedEnv...)
+	return append(env, proxyVariable+"="+r.proxy), nil
+}
+
 // ModuleError is the reason the go command could not resolve one module.
 type ModuleError struct {
 	Err string
