@@ -947,8 +947,10 @@ func TestListTreeRejectsNonTrees(t *testing.T) {
 //
 // A revision git would resolve makes the written commit depend on the state of
 // the repository at the moment it ran rather than on what the caller described,
-// and an identity git fills in from the environment attributes the commit to
-// whoever happened to run the engine. Both are silent, so both are refused.
+// and an identity git completes from the environment or the clock attributes the
+// commit to whoever ran the engine, at whatever time they ran it. Every one of
+// those is silent and every one of them changes the object name, so this is the
+// plumbing writer's contract rather than the friendlier one Commit offers.
 func TestWriteCommitRequiresExactObjectNames(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -961,7 +963,7 @@ func TestWriteCommitRequiresExactObjectNames(t *testing.T) {
 	if err := repo.Git.CreateRef(ctx, "refs/heads/topic", commit); err != nil {
 		t.Fatalf("create ref: %v", err)
 	}
-	whole := gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "1700000000 +0000"}
+	whole := gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: testRawDate}
 
 	tests := []struct {
 		name string
@@ -973,12 +975,29 @@ func TestWriteCommitRequiresExactObjectNames(t *testing.T) {
 		{name: "empty tree name", opts: gitcli.CommitTreeOptions{Author: whole, Committer: whole}},
 		{name: "parent named by a branch", opts: gitcli.CommitTreeOptions{Tree: tree, Parents: []string{"refs/heads/topic"}, Author: whole, Committer: whole}},
 		{name: "abbreviated parent", opts: gitcli.CommitTreeOptions{Tree: tree, Parents: []string{commit[:8]}, Author: whole, Committer: whole}},
-		{name: "author without a name", opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Email: testUserEmail}, Committer: whole}},
-		{name: "author without an address", opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: testUserName}, Committer: whole}},
-		{name: "committer without a name", opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Email: testUserEmail}}},
-		{name: "committer without an address", opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Name: testUserName}}},
+		// Each identity case carries whatever the case is not about, so a
+		// failure names one cause rather than several at once.
+		{name: "author without a name", opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Email: testUserEmail, Date: testRawDate}, Committer: whole}},
+		{name: "author without an address", opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: testUserName, Date: testRawDate}, Committer: whole}},
+		{name: "committer without a name", opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Email: testUserEmail, Date: testRawDate}}},
+		{name: "committer without an address", opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Name: testUserName, Date: testRawDate}}},
+		// An absent date makes commit-tree record the wall clock, and a friendly
+		// one asks git to interpret it, so the same fields would produce a
+		// different object name depending on when and where the run happened.
 		{name: "author without a date", opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: testUserName, Email: testUserEmail}, Committer: whole}},
 		{name: "committer without a date", opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail}}},
+		{
+			name: "author date in RFC 3339",
+			opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "2026-01-02T03:04:05+05:30"}, Committer: whole},
+		},
+		{
+			name: "committer date git would have to interpret",
+			opts: gitcli.CommitTreeOptions{Tree: tree, Author: whole, Committer: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "yesterday"}},
+		},
+		{
+			name: "author date without a zone offset",
+			opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: testUserName, Email: testUserEmail, Date: "1700000000"}, Committer: whole},
+		},
 		{
 			name: "author name carrying an angle bracket",
 			opts: gitcli.CommitTreeOptions{Tree: tree, Author: gitcli.Signature{Name: "A <evil@example.com>", Email: testUserEmail}, Committer: whole},
