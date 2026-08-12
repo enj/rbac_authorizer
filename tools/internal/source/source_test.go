@@ -51,14 +51,18 @@ func newUpstream(ctx context.Context, t *testing.T) *upstream {
 
 	up := &upstream{repo: repo}
 	up.base = repo.WriteAndCommit(ctx, t, "README.md", "base\n", "docs: add readme\n")
+	repo.WriteFile(t, "pkg/apis/rbac/types.go", "package rbac\n")
 	repo.WriteFile(t, "pkg/apis/rbac/v1/doc.go", "package v1\n")
 	repo.WriteFile(t, "pkg/apis/rbac/v1/helpers.go", "package v1\n")
 	repo.WriteFile(t, "pkg/apis/rbac/v1/nested/deep.go", "package nested\n")
+	repo.WriteFile(t, "pkg/apis/rbac/v1beta1/types.go", "package v1beta1\n")
 	repo.WriteFile(t, "plugin/pkg/auth/authorizer/rbac/rbac.go", "package rbac\n")
 	up.mainOne = repo.Commit(ctx, t, "feat: add authorizer\n", gitcli.CommitOptions{},
+		"pkg/apis/rbac/types.go",
 		"pkg/apis/rbac/v1/doc.go",
 		"pkg/apis/rbac/v1/helpers.go",
 		"pkg/apis/rbac/v1/nested/deep.go",
+		"pkg/apis/rbac/v1beta1/types.go",
 		"plugin/pkg/auth/authorizer/rbac/rbac.go",
 	)
 
@@ -775,6 +779,105 @@ func TestAddWorktreeMaterializesPackages(t *testing.T) {
 	}
 }
 
+// TestAddWorktreeMaterializesNestedPackages proves the pattern set against real
+// git rather than against the rendering in TestSparsePatterns.
+//
+// The claim is not obvious. An ancestor root keeps the exclusion that hides its
+// subdirectories, so the only reason the nested root's files arrive is that git
+// reads the pattern file with gitignore semantics and lets a later include undo
+// an earlier exclusion for the paths it names. Nothing but a real checkout can
+// confirm that, and the alternative rendering, which drops the ancestor's
+// exclusion instead, passes an exact-output test while silently materializing
+// every sibling subpackage.
+func TestAddWorktreeMaterializesNestedPackages(t *testing.T) {
+	ctx := t.Context()
+	up := newUpstream(ctx, t)
+	cache := openCache(ctx, t, up)
+
+	patterns, err := source.SparsePatterns([]string{"pkg/apis/rbac", "pkg/apis/rbac/v1"}, false)
+	if err != nil {
+		t.Fatalf("sparse patterns: %v", err)
+	}
+	worktree, err := cache.AddWorktree(ctx, source.WorktreeOptions{Commit: up.mainOne, Patterns: patterns})
+	if err != nil {
+		t.Fatalf("add worktree: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := worktree.Remove(context.WithoutCancel(ctx)); err != nil {
+			t.Errorf("remove worktree: %v", err)
+		}
+	})
+
+	// The ancestor's own files and the nested root's own files, and nothing
+	// else: not v1beta1, which is a sibling subpackage of the ancestor, and not
+	// v1/nested, which is a subpackage of the leaf root.
+	want := []string{
+		"pkg/apis/rbac/types.go",
+		"pkg/apis/rbac/v1/doc.go",
+		"pkg/apis/rbac/v1/helpers.go",
+	}
+	if got := materializedPaths(t, worktree.Path()); !slices.Equal(got, want) {
+		t.Fatalf("materialized %v, want %v", got, want)
+	}
+}
+
+// TestWorktreeSetPatternsWidensAndRestores covers the extraction pipeline's
+// widening loop: a work tree materialized for one package grows to hold a
+// second, and the tree it ends up with is the one upstream produced rather than
+// whatever an earlier pass left behind.
+func TestWorktreeSetPatternsWidensAndRestores(t *testing.T) {
+	ctx := t.Context()
+	up := newUpstream(ctx, t)
+	cache := openCache(ctx, t, up)
+
+	narrow, err := source.SparsePatterns([]string{"pkg/apis/rbac/v1"}, false)
+	if err != nil {
+		t.Fatalf("sparse patterns: %v", err)
+	}
+	worktree, err := cache.AddWorktree(ctx, source.WorktreeOptions{Commit: up.mainOne, Patterns: narrow})
+	if err != nil {
+		t.Fatalf("add worktree: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := worktree.Remove(context.WithoutCancel(ctx)); err != nil {
+			t.Errorf("remove worktree: %v", err)
+		}
+	})
+
+	// A removal stands in for the pruning an earlier closure pass performs. The
+	// widened tree has to hold it again, because the pre-prune measurement only
+	// means what it says over the tree as upstream produced it.
+	if err := os.Remove(filepath.Join(worktree.Path(), "pkg", "apis", "rbac", "v1", "helpers.go")); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+
+	wide, err := source.SparsePatterns([]string{"pkg/apis/rbac/v1", "plugin/pkg/auth/authorizer/rbac"}, false)
+	if err != nil {
+		t.Fatalf("sparse patterns: %v", err)
+	}
+	if err := worktree.SetPatterns(ctx, wide); err != nil {
+		t.Fatalf("set patterns: %v", err)
+	}
+
+	want := []string{
+		"pkg/apis/rbac/v1/doc.go",
+		"pkg/apis/rbac/v1/helpers.go",
+		"plugin/pkg/auth/authorizer/rbac/rbac.go",
+	}
+	if got := materializedPaths(t, worktree.Path()); !slices.Equal(got, want) {
+		t.Fatalf("materialized %v, want %v", got, want)
+	}
+
+	// Widening a work tree must not move anything in the shared cache.
+	head, err := cache.Git().ResolveCommit(ctx, "refs/heads/"+mainBranch)
+	if err != nil {
+		t.Fatalf("resolve cached branch: %v", err)
+	}
+	if head != up.merge {
+		t.Fatalf("cached branch moved to %s, want %s", head, up.merge)
+	}
+}
+
 func TestAddWorktreeVariants(t *testing.T) {
 	ctx := t.Context()
 	up := newUpstream(ctx, t)
@@ -810,6 +913,233 @@ func TestAddWorktreeVariants(t *testing.T) {
 			t.Fatal("expected an error")
 		}
 	})
+
+	t.Run("derived names are unique per call", func(t *testing.T) {
+		// Two materializations of one commit are the ordinary case when an
+		// operator compares profiles or CI runs a matrix. A name derived from
+		// the commit alone would make the second fail on the registration the
+		// first owns, or hand it a tree the first is pruning files out of.
+		first, err := cache.AddWorktree(ctx, source.WorktreeOptions{Commit: up.base})
+		if err != nil {
+			t.Fatalf("add the first worktree: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := first.Remove(context.WithoutCancel(ctx)); err != nil {
+				t.Errorf("remove the first worktree: %v", err)
+			}
+		})
+		second, err := cache.AddWorktree(ctx, source.WorktreeOptions{Commit: up.base})
+		if err != nil {
+			t.Fatalf("add the second worktree over the same commit: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := second.Remove(context.WithoutCancel(ctx)); err != nil {
+				t.Errorf("remove the second worktree: %v", err)
+			}
+		})
+
+		if first.Path() == second.Path() {
+			t.Fatalf("both work trees are %s", first.Path())
+		}
+		if first.Commit() != second.Commit() {
+			t.Fatalf("the two work trees hold %s and %s", first.Commit(), second.Commit())
+		}
+		// Removing one leaves the other intact and usable.
+		if err := second.Remove(ctx); err != nil {
+			t.Fatalf("remove the second worktree: %v", err)
+		}
+		if got := materializedPaths(t, first.Path()); len(got) == 0 {
+			t.Error("removing one work tree emptied the other")
+		}
+	})
+}
+
+// TestAddWorktreeNoLazyFetch proves the materialization can refuse to reach the
+// promisor remote.
+//
+// A blobless cache holds every commit and tree and none of the blobs, so a
+// checkout is precisely the operation that reaches for them. Refusing to fetch
+// says nothing about it, because no fetch call is involved: git downloads what
+// the checkout needs on its own. The refusal therefore has to live where the
+// checkout does.
+func TestAddWorktreeNoLazyFetch(t *testing.T) {
+	ctx := t.Context()
+	up := newUpstream(ctx, t)
+
+	patterns, err := source.SparsePatterns([]string{"pkg/apis/rbac/v1"}, false)
+	if err != nil {
+		t.Fatalf("sparse patterns: %v", err)
+	}
+
+	t.Run("refused", func(t *testing.T) {
+		cache := openCache(ctx, t, up)
+		_, err := cache.AddWorktree(ctx, source.WorktreeOptions{
+			Commit:      up.mainOne,
+			Patterns:    patterns,
+			NoLazyFetch: true,
+		})
+		if err == nil {
+			t.Fatal("a blobless cache holds no blobs, so the checkout had to fetch or fail")
+		}
+		if !strings.Contains(err.Error(), "lazy fetching disabled") {
+			t.Fatalf("error %v does not show the refusal", err)
+		}
+		// The failure is local. Nothing may name the remote, because reaching it
+		// is the thing that did not happen.
+		if strings.Contains(err.Error(), up.repo.Dir) {
+			t.Errorf("the refusal reached for the remote: %v", err)
+		}
+	})
+
+	t.Run("permitted", func(t *testing.T) {
+		// The same materialization without the refusal is the ordinary case a
+		// blobless cache exists for, and it has to keep working.
+		cache := openCache(ctx, t, up)
+		worktree, err := cache.AddWorktree(ctx, source.WorktreeOptions{
+			Commit:   up.mainOne,
+			Patterns: patterns,
+		})
+		if err != nil {
+			t.Fatalf("add worktree: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := worktree.Remove(context.WithoutCancel(ctx)); err != nil {
+				t.Errorf("remove worktree: %v", err)
+			}
+		})
+		if got := materializedPaths(t, worktree.Path()); len(got) == 0 {
+			t.Error("the permitted materialization produced no files")
+		}
+	})
+}
+
+// TestWorktreeSetPatternsKeepsTheMatchingMode proves a pattern change does not
+// silently switch a tree between cone and pattern matching.
+//
+// The two modes select different paths: cone matching always includes a matched
+// directory's subdirectories, which is exactly what package granularity refuses.
+// A caller that asked for one and got the other on its next widening round would
+// materialize a tree it never asked for.
+func TestWorktreeSetPatternsKeepsTheMatchingMode(t *testing.T) {
+	ctx := t.Context()
+	up := newUpstream(ctx, t)
+	cache := openCache(ctx, t, up)
+
+	worktree, err := cache.AddWorktree(ctx, source.WorktreeOptions{
+		Commit:   up.mainOne,
+		Cone:     true,
+		Patterns: []string{"pkg"},
+	})
+	if err != nil {
+		t.Fatalf("add worktree: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := worktree.Remove(context.WithoutCancel(ctx)); err != nil {
+			t.Errorf("remove worktree: %v", err)
+		}
+	})
+
+	if err := worktree.SetPatterns(ctx, []string{"pkg"}); err != nil {
+		t.Fatalf("set patterns: %v", err)
+	}
+	// Cone mode records the directory it was given; pattern mode would have
+	// rewritten the set into the gitignore style patterns git derives.
+	patterns, err := worktree.Git().SparseCheckoutPatterns(ctx)
+	if err != nil {
+		t.Fatalf("read patterns: %v", err)
+	}
+	if !slices.Contains(patterns, "pkg") {
+		t.Errorf("the cone pattern set became %v, so the matching mode changed", patterns)
+	}
+}
+
+// TestOpenAuditsDynamicPromisorValues proves a per-remote promisor entry is
+// checked for what it says rather than only for whose it is.
+//
+// A filtered fetch that names a URL rather than a configured remote makes git
+// record the filter under a section keyed by that URL. The key name proves only
+// who the section is about: promisor may be false and the filter may name
+// something other than the one the cache is built on, and either would leave the
+// cache downloading history the profile never asked for or refusing to fetch the
+// blobs a materialization needs.
+func TestOpenAuditsDynamicPromisorValues(t *testing.T) {
+	ctx := t.Context()
+	up := newUpstream(ctx, t)
+
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		want  string
+	}{
+		{
+			name:  "promisor turned off",
+			key:   "promisor",
+			value: "false",
+			want:  `not the required "true"`,
+		},
+		{
+			name:  "filter widened",
+			key:   "partialclonefilter",
+			value: "blob:limit=1g",
+			want:  `not the required "blob:none"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			opts := source.Options{
+				Remote:       up.url(),
+				CacheRoot:    filepath.Join(root, "cache"),
+				WorktreeRoot: filepath.Join(root, "worktrees"),
+				Git:          runner(t, root),
+			}
+			cache, err := source.Open(ctx, opts)
+			if err != nil {
+				t.Fatalf("open cache: %v", err)
+			}
+
+			// The key is the one a filtered fetch against a URL writes, and it
+			// names the configured remote, so the name check accepts it.
+			key := "remote." + up.url() + "." + test.key
+			if err := cache.Git().SetConfigLocal(ctx, key, test.value); err != nil {
+				t.Fatalf("write %s: %v", key, err)
+			}
+
+			_, err = source.Open(ctx, opts)
+			if err == nil {
+				t.Fatalf("reopening accepted %s=%s", key, test.value)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error %v does not report the rejected value", err)
+			}
+		})
+	}
+
+	t.Run("the values a filtered fetch really writes are accepted", func(t *testing.T) {
+		root := t.TempDir()
+		opts := source.Options{
+			Remote:       up.url(),
+			CacheRoot:    filepath.Join(root, "cache"),
+			WorktreeRoot: filepath.Join(root, "worktrees"),
+			Git:          runner(t, root),
+		}
+		cache, err := source.Open(ctx, opts)
+		if err != nil {
+			t.Fatalf("open cache: %v", err)
+		}
+		for key, value := range map[string]string{
+			"remote." + up.url() + ".promisor":           "true",
+			"remote." + up.url() + ".partialclonefilter": "blob:none",
+		} {
+			if err := cache.Git().SetConfigLocal(ctx, key, value); err != nil {
+				t.Fatalf("write %s: %v", key, err)
+			}
+		}
+		if _, err := source.Open(ctx, opts); err != nil {
+			t.Fatalf("reopening refused the configuration a filtered fetch writes: %v", err)
+		}
+	})
 }
 
 func TestSparsePatterns(t *testing.T) {
@@ -832,21 +1162,36 @@ func TestSparsePatterns(t *testing.T) {
 			want:      []string{"/pkg/apis/rbac/v1/"},
 		},
 		{
-			name:  "several roots keep their order",
+			// Order is not the caller's to choose: an ancestor's subdirectory
+			// exclusion has to precede a nested root's include, so every set is
+			// sorted and the sorted form is what the pattern file records.
+			name:  "several roots are sorted",
 			roots: []string{"plugin/pkg/auth/authorizer/rbac", "pkg/registry/rbac/validation"},
 			want: []string{
-				"/plugin/pkg/auth/authorizer/rbac/*",
-				"!/plugin/pkg/auth/authorizer/rbac/*/",
 				"/pkg/registry/rbac/validation/*",
 				"!/pkg/registry/rbac/validation/*/",
+				"/plugin/pkg/auth/authorizer/rbac/*",
+				"!/plugin/pkg/auth/authorizer/rbac/*/",
 			},
 		},
 		{
-			// One root's subdirectory exclusion would delete the other root's
-			// files, and which one wins would depend on the listed order.
-			name:    "nested roots",
-			roots:   []string{"pkg/apis/rbac", "pkg/apis/rbac/v1"},
-			wantErr: "non-recursive materialization cannot express",
+			// The ancestor keeps its subdirectory exclusion, so the sibling
+			// subpackages it would otherwise pull in stay out, and the nested
+			// root's include follows that exclusion and undoes it for exactly
+			// the directory the closure asked for.
+			name:  "nested roots",
+			roots: []string{"pkg/apis/rbac/v1", "pkg/apis/rbac"},
+			want: []string{
+				"/pkg/apis/rbac/*",
+				"!/pkg/apis/rbac/*/",
+				"/pkg/apis/rbac/v1/*",
+				"!/pkg/apis/rbac/v1/*/",
+			},
+		},
+		{
+			name:  "duplicate roots collapse",
+			roots: []string{"pkg/apis/rbac", "pkg/apis/rbac"},
+			want:  []string{"/pkg/apis/rbac/*", "!/pkg/apis/rbac/*/"},
 		},
 		{
 			name:      "nested roots are fine when recursive",

@@ -88,9 +88,20 @@ func usagef(format string, args ...any) error {
 
 // checkError reports that a command ran successfully and found violations. The
 // command has already written the detail, so only the exit code remains.
-type checkError struct{ summary string }
+//
+// The cause is carried rather than discarded. A cancellation reaches the
+// dispatcher wrapped in whatever the interrupted phase reported, and a plan may
+// wrap that again as a stage failure, so a check error that severed its chain
+// would make an interrupted run exit as a finding about the profile. The
+// dispatcher tests for cancellation before it tests for this type, which only
+// works while the chain survives.
+type checkError struct {
+	summary string
+	err     error
+}
 
 func (e *checkError) Error() string { return e.summary }
+func (e *checkError) Unwrap() error { return e.err }
 
 // command is one dispatchable subcommand.
 type command struct {
@@ -113,13 +124,17 @@ func versionCommand() command {
 	return command{name: "version", summary: "print the engine version", run: runVersion}
 }
 
+func planCommand() command {
+	return command{name: "plan", summary: "compute the extraction plan for one upstream ref", run: runPlan}
+}
+
 func helpCommand() command {
 	return command{name: "help", summary: "print usage for soapbox or one command", run: runHelp}
 }
 
 // commands are listed in the order the help output uses.
 func commands() []command {
-	return []command{doctorCommand(), validateCommand(), versionCommand(), helpCommand()}
+	return []command{doctorCommand(), validateCommand(), planCommand(), versionCommand(), helpCommand()}
 }
 
 // Run dispatches one command line and returns the process exit code.
@@ -404,6 +419,8 @@ func runHelp(_ context.Context, env Env, args []string) error {
 			fs, _ = doctorFlagSet()
 		case "validate":
 			fs, _ = validateFlagSet()
+		case "plan":
+			fs, _ = planFlagSet()
 		default:
 			fs = newFlagSet(cmd.name)
 		}

@@ -18,6 +18,7 @@ package source
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -25,7 +26,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/enj/soapbox/tools/internal/config"
 	"github.com/enj/soapbox/tools/internal/gitcli"
@@ -47,6 +50,17 @@ const worktreePrefix = "wt-"
 // It is long enough to stay unique in one run and short enough to keep paths
 // well below the platform limit.
 const shortSHALength = 12
+
+// worktreeNonceBytes is how much randomness a derived work tree name carries
+// beyond the commit.
+//
+// The commit alone does not name a work tree uniquely. Two plans over one
+// commit are the ordinary case when an operator compares profiles or when CI
+// runs a matrix, and a shared directory name would make the second run fail on
+// a registration the first owns, or hand it a tree the first is pruning files
+// out of. Sixty-four bits is far more than enough to separate the runs that can
+// be in flight against one cache at once.
+const worktreeNonceBytes = 8
 
 // Kind distinguishes the two ref namespaces a profile may track.
 type Kind string
@@ -283,6 +297,56 @@ const (
 	promisorEnabled = "true"
 )
 
+// Per-remote suffixes git records for a filtered fetch.
+//
+// A fetch that names a URL rather than a configured remote makes git record the
+// filter under a section keyed by that URL, so a cache that has been fetched
+// into carries remote.<url>.promisor and remote.<url>.partialclonefilter beside
+// the remote.origin.* pair the clone wrote. The keys are legitimate, but only
+// for the one remote this configuration names.
+const (
+	promisorSuffix    = ".promisor"
+	cloneFilterSuffix = ".partialclonefilter"
+)
+
+// allowedConfigKey reports whether a cache may carry one configuration key.
+//
+// The static allowlist covers everything git writes when it creates a bare
+// blobless clone. The dynamic half covers what a filtered fetch adds, and it is
+// scoped to the configured remote rather than opened up to any remote: a key
+// naming a different host is exactly the evidence the audit exists to find, and
+// it would still be refused.
+//
+// Permitting the key is only half the check. The value a per-remote promisor
+// entry carries decides whether that remote is treated as a promisor at all and
+// what filter is applied to it, so [Cache.auditDynamicRemote] proves the value
+// as well; a key allowed by name with a value nobody looked at would let a
+// filter be turned off in the one place the static allowlist does not reach.
+func (c *Cache) allowedConfigKey(key string) bool {
+	if allowedCacheConfig[key] {
+		return true
+	}
+	remote := strings.ToLower(c.remote)
+	for _, suffix := range []string{promisorSuffix, cloneFilterSuffix} {
+		if key == "remote."+remote+suffix {
+			return true
+		}
+	}
+	return false
+}
+
+// dynamicRemoteValue reports the value a per-remote promisor key must carry.
+func dynamicRemoteValue(key string) (string, bool) {
+	switch {
+	case strings.HasSuffix(key, promisorSuffix):
+		return promisorEnabled, true
+	case strings.HasSuffix(key, cloneFilterSuffix):
+		return gitcli.BloblessFilter, true
+	default:
+		return "", false
+	}
+}
+
 // audit proves the cache on disk is the one this configuration describes.
 //
 // A restored or tampered cache passes every ordinary check: it is a bare
@@ -299,8 +363,20 @@ func (c *Cache) audit(ctx context.Context) error {
 		return err
 	}
 	for _, entry := range entries {
-		if !allowedCacheConfig[strings.ToLower(entry.Key)] {
+		key := strings.ToLower(entry.Key)
+		if !c.allowedConfigKey(key) {
 			return fmt.Errorf("%s configuration %q is not part of a generated cache", entry.Scope, entry.Key)
+		}
+		if allowedCacheConfig[key] {
+			continue
+		}
+		// What is left is a per-remote promisor entry a filtered fetch wrote.
+		// Its name has been proved to be the configured remote's; its value
+		// decides whether the filter is in force, and a fetch that recorded
+		// blob:limit=1g or turned the promisor off would otherwise pass an
+		// audit that only read names.
+		if err := c.auditDynamicRemote(ctx, entry); err != nil {
+			return err
 		}
 	}
 
@@ -337,6 +413,31 @@ func (c *Cache) audit(ctx context.Context) error {
 	return nil
 }
 
+// auditDynamicRemote proves one per-remote promisor entry says what its name
+// implies.
+//
+// A fetch that names a URL rather than a configured remote makes git record the
+// filter under a section keyed by that URL. The section is legitimate, and the
+// key name having been checked against the configured remote only proves who it
+// is about: promisor may be false, and partialclonefilter may name a filter
+// other than the one this cache is built on. Either would leave the cache
+// downloading history the profile never asked for, or refusing to lazily fetch
+// the blobs a materialization needs, so the value is proved too.
+func (c *Cache) auditDynamicRemote(ctx context.Context, entry gitcli.ConfigEntry) error {
+	want, known := dynamicRemoteValue(strings.ToLower(entry.Key))
+	if !known {
+		return fmt.Errorf("%s configuration %q is not part of a generated cache", entry.Scope, entry.Key)
+	}
+	value, found, err := c.git.ConfigEffective(ctx, entry.Key)
+	if err != nil {
+		return err
+	}
+	if !found || value != want {
+		return fmt.Errorf("%s is %q, not the required %q", entry.Key, value, want)
+	}
+	return nil
+}
+
 // assertPartialClone proves the filter was applied rather than merely recorded.
 //
 // A server that does not support object filtering makes git warn, exit zero,
@@ -365,6 +466,59 @@ func (c *Cache) assertPartialClone(ctx context.Context) error {
 
 // Path reports the cache directory.
 func (c *Cache) Path() string { return c.dir }
+
+// worktreeLocks serializes work tree administration per cache directory.
+//
+// Git's work tree commands enumerate every registration under the repository's
+// worktrees directory, and deleting one is not atomic with respect to that
+// enumeration: a removal that runs while another registration is being deleted
+// reads a half deleted administrative directory and fails outright, naming a
+// work tree it was not asked about. Two plans against one cache is the ordinary
+// case when an operator compares profiles, so the administration is serialized
+// rather than left to chance.
+//
+// The lock is per cache directory because that is the scope git contends on,
+// and it is held only across the administrative commands, never across a
+// checkout: materializing a work tree is the slow part and two runs may do it
+// at once.
+//
+// It serializes one process. Two separate soapbox processes sharing a cache
+// directory are outside what this can coordinate, and the failure they would
+// hit is the same transient one, so a run that hits it fails cleanly rather
+// than corrupting anything.
+var worktreeLocks = worktreeRegistry{byCache: make(map[string]*sync.Mutex)}
+
+// worktreeRegistry hands out one administration lock per cache directory.
+type worktreeRegistry struct {
+	mu      sync.Mutex
+	byCache map[string]*sync.Mutex
+}
+
+// lockWorktrees serializes this cache's work tree administration and returns
+// the release.
+func (c *Cache) lockWorktrees() func() {
+	worktreeLocks.mu.Lock()
+	lock, found := worktreeLocks.byCache[c.dir]
+	if !found {
+		lock = new(sync.Mutex)
+		worktreeLocks.byCache[c.dir] = lock
+	}
+	worktreeLocks.mu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
+}
+
+// PruneWorktrees drops registrations whose directory is already gone.
+//
+// A registration an interrupted run left behind would block the work tree a
+// later run needs, and pruning moves no ref. It goes through the cache rather
+// than through the runner so it is serialized with the rest of this cache's
+// work tree administration.
+func (c *Cache) PruneWorktrees(ctx context.Context) error {
+	defer c.lockWorktrees()()
+	return c.git.PruneWorktrees(ctx)
+}
 
 // Remote reports the upstream repository the cache tracks.
 func (c *Cache) Remote() string { return c.remote }
@@ -660,14 +814,38 @@ type WorktreeOptions struct {
 	// Cone selects cone mode, which matches faster but always includes
 	// subdirectories. Package granularity needs pattern mode.
 	Cone bool
+	// NoLazyFetch refuses every lazy object fetch this work tree's content
+	// changing commands would otherwise trigger.
+	//
+	// It is what an offline run needs and what nothing else provides. The cache
+	// is a blobless partial clone, so checking out a commit whose blobs never
+	// arrived makes git download them from the promisor remote; no fetch call is
+	// involved, so refusing to fetch does not stop it. With this set, the same
+	// checkout fails locally and names the object it is missing.
+	//
+	// It is a property of the materialization rather than of the caller's
+	// runner, so a caller cannot get an offline work tree wrong by building its
+	// runner the ordinary way. It needs a Git that honours the variable, which
+	// [Open] has already established: it runs gitcli's minimum version check,
+	// and that floor exists for exactly this knob.
+	NoLazyFetch bool
 }
 
 // Worktree is one isolated materialization of a source commit.
 type Worktree struct {
 	path   string
 	commit string
-	git    *gitcli.Runner
-	cache  *Cache
+	// cone records the matching mode the tree was created with, so a later
+	// pattern change keeps it. Rebuilding the tree in the other mode would
+	// change which paths materialize without the caller asking for it.
+	cone bool
+	git  *gitcli.Runner
+	// guarded runs the commands that write content into the tree when lazy
+	// fetching was refused, and is nil otherwise. It is held rather than rebuilt
+	// per call because widening rematerializes the tree, so the guard has to
+	// survive as long as the work tree does.
+	guarded *gitcli.Runner
+	cache   *Cache
 }
 
 // AddWorktree materializes one commit in its own work tree.
@@ -676,6 +854,10 @@ type Worktree struct {
 // then is the commit checked out, so a blobless clone fetches blobs for the
 // selected paths instead of the entire tree. HEAD is always detached, so a
 // materialization can never move a ref in the shared cache.
+//
+// A derived name is unique per call rather than derived from the commit alone,
+// so two runs over one commit get two trees. A caller that needs a stable name,
+// such as a test asserting on the directory, passes one.
 func (c *Cache) AddWorktree(ctx context.Context, opts WorktreeOptions) (*Worktree, error) {
 	commit, err := c.git.ResolveCommit(ctx, opts.Commit)
 	if err != nil {
@@ -683,7 +865,11 @@ func (c *Cache) AddWorktree(ctx context.Context, opts WorktreeOptions) (*Worktre
 	}
 	name := opts.Name
 	if name == "" {
-		name = worktreePrefix + shortSHA(commit)
+		nonce, err := worktreeNonce()
+		if err != nil {
+			return nil, fmt.Errorf("source worktree: %w", err)
+		}
+		name = worktreePrefix + shortSHA(commit) + "-" + nonce
 	}
 	if err := config.ValidateRelPath(name); err != nil {
 		return nil, fmt.Errorf("source worktree %q: %w", name, err)
@@ -696,45 +882,114 @@ func (c *Cache) AddWorktree(ctx context.Context, opts WorktreeOptions) (*Worktre
 		return nil, fmt.Errorf("source worktree: %w", err)
 	}
 
+	unlock := c.lockWorktrees()
 	if err := c.git.AddWorktree(ctx, gitcli.WorktreeOptions{
 		Path:       dir,
 		Commit:     commit,
 		NoCheckout: true,
 	}); err != nil {
+		unlock()
 		return nil, fmt.Errorf("source worktree: %w", err)
 	}
+	unlock()
 
 	git, err := c.git.WithDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("source worktree: %w", err)
 	}
-	worktree := &Worktree{path: dir, commit: commit, git: git, cache: c}
+	worktree := &Worktree{path: dir, commit: commit, cone: opts.Cone, git: git, cache: c}
+	if opts.NoLazyFetch {
+		// The pin is taken from this work tree's own runner, so it keeps the
+		// isolation, the discovery ceiling, and the redactor the caller's runner
+		// carries, and adds only the refusal.
+		worktree.guarded = git.WithNoLazyFetch()
+	}
 	if err := worktree.materialize(ctx, opts); err != nil {
 		// The half built work tree is removed so a retry is not blocked by it,
-		// and the original failure is what the caller sees.
+		// and the original failure is what the caller sees. The checkout that
+		// just failed ran without the administration lock, so taking it here is
+		// the ordinary removal rather than a nested acquisition.
 		return nil, errors.Join(err, worktree.Remove(ctx))
 	}
 	return worktree, nil
 }
 
+// worktreeNonce renders the random half of a derived work tree name.
+func worktreeNonce() (string, error) {
+	nonce := make([]byte, worktreeNonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("derive a work tree name: %w", err)
+	}
+	return hex.EncodeToString(nonce), nil
+}
+
 // materialize installs the pattern set and checks out the commit.
 func (w *Worktree) materialize(ctx context.Context, opts WorktreeOptions) error {
+	content := w.content()
 	if len(opts.Patterns) > 0 {
-		if err := w.git.SetSparseCheckout(ctx, gitcli.SparseOptions{
+		if err := content.SetSparseCheckout(ctx, gitcli.SparseOptions{
 			Cone:     opts.Cone,
 			Patterns: opts.Patterns,
 		}); err != nil {
 			return fmt.Errorf("source worktree: %w", err)
 		}
 	}
-	if err := w.git.CheckoutDetached(ctx, w.commit); err != nil {
+	if err := content.CheckoutDetached(ctx, w.commit); err != nil {
 		return fmt.Errorf("source worktree: %w", err)
 	}
 	return nil
 }
 
+// content reports the runner the commands that write files into the tree run
+// through.
+//
+// Every command that can populate a path goes through it, because any of them
+// can be the one that reaches for a blob the cache does not hold: the checkout
+// that first fills the tree, and the sparse change, reset, and clean that
+// rematerialize it when the closure widens.
+func (w *Worktree) content() *gitcli.Runner {
+	if w.guarded != nil {
+		return w.guarded
+	}
+	return w.git
+}
+
 // Path reports the work tree directory.
 func (w *Worktree) Path() string { return w.path }
+
+// SetPatterns installs a new sparse pattern set and rematerializes the work
+// tree from the commit it holds.
+//
+// It exists for the extraction pipeline's widening loop, where the closure
+// discovers a package no configured root named and the work tree has to grow to
+// hold it. The rematerialization is deliberately total: the pattern change alone
+// would leave behind whatever an earlier pass removed from the tree, and the
+// closure's pre-prune measurement only means what it says when it runs over the
+// tree exactly as upstream produced it.
+//
+// No ref moves. The work tree's HEAD is already detached at the commit, so the
+// reset restores content without touching the shared cache.
+//
+// The matching mode is the one the tree was created with. Silently switching to
+// pattern mode would change which paths a cone mode tree materializes, so a
+// caller that asked for cone matching and then widened would get a different
+// tree from the one it asked for.
+func (w *Worktree) SetPatterns(ctx context.Context, patterns []string) error {
+	if len(patterns) == 0 {
+		return errors.New("source worktree: at least one sparse pattern is required")
+	}
+	content := w.content()
+	if err := content.SetSparseCheckout(ctx, gitcli.SparseOptions{Cone: w.cone, Patterns: patterns}); err != nil {
+		return fmt.Errorf("source worktree: %w", err)
+	}
+	if err := content.ResetHard(ctx, w.commit); err != nil {
+		return fmt.Errorf("source worktree: %w", err)
+	}
+	if err := content.Clean(ctx); err != nil {
+		return fmt.Errorf("source worktree: %w", err)
+	}
+	return nil
+}
 
 // Commit reports the materialized commit.
 func (w *Worktree) Commit() string { return w.commit }
@@ -746,6 +1001,9 @@ func (w *Worktree) Git() *gitcli.Runner { return w.git }
 // deferred cleanup is safe after a failure that already removed it and cannot
 // mask the error that caused the failure.
 func (w *Worktree) Remove(ctx context.Context) error {
+	// Removing this work tree makes git enumerate every registration the cache
+	// holds, so it cannot run while another run is deleting one of its own.
+	defer w.cache.lockWorktrees()()
 	if err := w.cache.git.RemoveWorktree(ctx, w.path); err != nil {
 		return fmt.Errorf("source worktree: %w", err)
 	}
@@ -768,6 +1026,18 @@ func (w *Worktree) Remove(ctx context.Context) error {
 // pattern that matches a directory matches everything below it, so each root is
 // followed by a negative pattern that excludes its subdirectories. That is what
 // makes extraction package granular rather than directory recursive.
+//
+// Roots may nest. A closure that follows imports reaches pkg/apis/rbac and
+// pkg/apis/rbac/v1 as two separate packages, and both have to materialize
+// without dragging in the sibling subpackages of either. Sorting the roots is
+// what expresses that: git reads the pattern file with gitignore semantics, so
+// the last pattern matching a path decides, and an ancestor's subdirectory
+// exclusion is therefore undone for exactly the descendants that follow it.
+// Sorting puts every ancestor before its descendants, because a directory path
+// is a proper prefix of everything below it. The exclusion is kept rather than
+// dropped for a root with a selected descendant: dropping it would re-include
+// every other subdirectory of that root, which is the package granularity
+// invariant this function exists to hold.
 func SparsePatterns(roots []string, recursive bool) ([]string, error) {
 	if len(roots) == 0 {
 		return nil, errors.New("sparse patterns: at least one package root is required")
@@ -779,19 +1049,11 @@ func SparsePatterns(roots []string, recursive bool) ([]string, error) {
 		}
 		cleaned = append(cleaned, path.Clean(root))
 	}
-	if !recursive {
-		// Nested roots would have one root's subdirectory exclusion delete
-		// another root's files, and the pattern order that resolves it depends
-		// on which root is listed first. The combination is refused rather than
-		// silently resolved.
-		for _, outer := range cleaned {
-			for _, inner := range cleaned {
-				if outer != inner && strings.HasPrefix(inner, outer+"/") {
-					return nil, fmt.Errorf("sparse patterns: package root %q contains %q, which non-recursive materialization cannot express", outer, inner)
-				}
-			}
-		}
-	}
+	// Sorting is load bearing rather than cosmetic, and deduplication keeps a
+	// root that a caller widened onto twice from emitting its exclusion after
+	// its own descendant's include.
+	slices.Sort(cleaned)
+	cleaned = slices.Compact(cleaned)
 
 	patterns := make([]string, 0, len(cleaned)*2)
 	for _, root := range cleaned {
@@ -834,6 +1096,15 @@ func shortSHA(commit string) string {
 	}
 	return commit[:shortSHALength]
 }
+
+// CacheDirName reports the directory name Open derives for a remote when
+// Options.Directory is empty.
+//
+// It is exported so a caller can tell whether a cache already exists before
+// asking for one. An offline run has to refuse rather than clone, and Open
+// clones as soon as it finds nothing at the path, so the decision has to happen
+// before the call.
+func CacheDirName(remote string) string { return cacheDirName(remote) }
 
 // cacheDirName derives a stable directory name from a remote URL. The readable
 // part helps a human recognise a cache directory, and the digest keeps two
