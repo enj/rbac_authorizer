@@ -8,4 +8,7 @@ go 1.26.0
 // generated module metadata must be byte identical across machines.
 toolchain go1.26.5
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	golang.org/x/mod v0.39.0
+	gopkg.in/yaml.v3 v3.0.1
+)
