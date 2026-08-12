@@ -78,6 +78,11 @@ var (
 	// ErrDestinationExists reports a materialization target that is already
 	// present. Relocation never merges into or overwrites an existing tree.
 	ErrDestinationExists = errors.New("destination already exists")
+	// ErrUnclassified reports a composed Go file below the module root that
+	// does not say which package it belongs to. Such a file compiles into a
+	// relocated package while appearing in no package record, so nothing that
+	// reads the set can account for it.
+	ErrUnclassified = errors.New("composed Go file does not declare its package")
 )
 
 // Mode is the file mode of a plan entry.
@@ -246,6 +251,60 @@ func (s FileSet) Lookup(destination string) (File, bool) {
 		return File{}, false
 	}
 	return s.Files[index], true
+}
+
+// With returns a copy of the set that also holds the given files.
+//
+// It exists because a generated module is not only relocated upstream code. A
+// curated facade, interface assertions, a root LICENSE and NOTICE, a README,
+// and package documentation are all files the engine produces rather than
+// copies, and they have to reach the tree through the same write boundary as
+// everything else. Composing them here means a generated file is checked
+// against exactly the invariants a copied file is checked against, instead of
+// being appended to a tree after the checks have already run.
+//
+// The receiver is not modified. A caller may hold a set across several
+// compositions, and a method that grew the underlying array in place would let
+// one composition become visible through an unrelated copy of the set.
+//
+// The result is re-sorted and fully revalidated rather than merely appended to.
+// A generated file can collide with a relocated one, differ from it only in
+// case, or land on a path another file occupies as a directory, and every one
+// of those is a tree that cannot be written, so it has to be refused here
+// rather than discovered halfway through writing it.
+//
+// A composed file may not be a symbolic link. The receiver was built under a
+// policy this method cannot see, so validating the combined set under the
+// permissive policy would let composition quietly grant a set relocated under
+// SymlinkReject the link rules it was built to refuse. Refusing links among the
+// added files keeps the policy the receiver was built under intact and costs
+// nothing: a generated facade, a licence, and a notice are all regular files.
+func (s FileSet) With(files ...File) (FileSet, error) {
+	for _, file := range files {
+		if file.Mode == ModeSymlink {
+			return FileSet{}, fmt.Errorf("relocate compose %q: a composed file may not be a symbolic link: %w", file.Path, ErrSymlink)
+		}
+		if err := checkComposedClassification(file); err != nil {
+			return FileSet{}, fmt.Errorf("relocate compose %q: %w", file.Path, err)
+		}
+	}
+	combined := make([]File, 0, len(s.Files)+len(files))
+	combined = append(combined, s.Files...)
+	combined = append(combined, files...)
+	if len(combined) == 0 {
+		return FileSet{}, nil
+	}
+	slices.SortFunc(combined, compareFiles)
+
+	// The combined set is still checked under SymlinkInternal, which is what
+	// Materialize uses: the receiver's own links, if it has any, were already
+	// accepted under the policy it was built with, and the added files have
+	// just been proved to contain none.
+	set := FileSet{Files: combined, Packages: groupPackages(combined)}
+	if err := checkFileSet(set, SymlinkInternal); err != nil {
+		return FileSet{}, fmt.Errorf("relocate compose: %w", err)
+	}
+	return set, nil
 }
 
 // Build maps a copy plan onto destination paths.
@@ -488,9 +547,18 @@ func checkOverlap(files []File) error {
 }
 
 // groupPackages collects the relocated files into their packages.
+//
+// A file with no package is not in one. Build always records the upstream
+// package a file came from, so this only concerns files a caller composed in:
+// a generated facade, a root licence, or a README belongs to no upstream
+// package, and inventing a record for the module root would describe a
+// relocation that never happened.
 func groupPackages(files []File) []Package {
 	var packages []Package
 	for _, file := range files {
+		if file.Package == "" {
+			continue
+		}
 		if n := len(packages); n > 0 && packages[n-1].Path == file.Package {
 			packages[n-1].Files = append(packages[n-1].Files, file.Path)
 			continue
@@ -501,15 +569,61 @@ func groupPackages(files []File) []Package {
 			Files:  []string{file.Path},
 		})
 	}
+	if len(packages) == 0 {
+		return nil
+	}
 	// Files are sorted by destination path, so a package's files are contiguous
 	// only when no other package sorts between them, which happens when one
 	// package directory is a prefix of another. Sorting by directory restores a
 	// single record per package.
-	slices.SortFunc(packages, func(a, b Package) int { return strings.Compare(a.Path, b.Path) })
+	//
+	// The upstream package is the tie break rather than a detail left to the
+	// sort. Two records can share a destination directory while naming
+	// different upstream ones, which a hand assembled set can produce, and
+	// SortFunc is not stable: without a total order the record that survives
+	// the merge, and therefore the upstream package the tree reports, would
+	// differ between runs over identical input.
+	slices.SortFunc(packages, comparePackages)
 	return mergePackages(packages)
 }
 
+// checkComposedClassification requires a composed Go file to say where it
+// belongs.
+//
+// A generated root file such as a facade, a licence, or a README belongs to no
+// relocated package, and recording one for it would describe a relocation that
+// never happened. Below the root the opposite holds: a Go file in a relocated
+// package directory compiles into that package, so a file that declares no
+// package would be built as part of it while appearing in no package record,
+// and every consumer of the set that works through Packages, including the
+// provenance cross check, would account for the tree without ever seeing it.
+//
+// The rule is limited to Go files because they are the ones that change what
+// the module does. A licence copied beside a relocated package is not compiled
+// and is accounted for by the licence evidence of the copy that brought it.
+func checkComposedClassification(file File) error {
+	if file.Package != "" || !strings.HasSuffix(file.Path, ".go") || path.Dir(file.Path) == "." {
+		return nil
+	}
+	return fmt.Errorf("%q is a Go file in %s: %w", file.Path, path.Dir(file.Path), ErrUnclassified)
+}
+
+// comparePackages orders package records by destination directory and breaks a
+// tie on the upstream directory, which is a total order over the records
+// grouping can produce.
+func comparePackages(a, b Package) int {
+	if order := strings.Compare(a.Path, b.Path); order != 0 {
+		return order
+	}
+	return strings.Compare(a.Source, b.Source)
+}
+
 // mergePackages folds adjacent records that describe one package.
+//
+// A merged record keeps the first record's upstream directory, which the sort
+// has made the lexicographically smallest one. Records that disagree about it
+// describe a set no relocation produced, so the choice only has to be stable,
+// and the files of every record are kept whichever upstream directory won.
 func mergePackages(packages []Package) []Package {
 	merged := packages[:0]
 	for _, pkg := range packages {
