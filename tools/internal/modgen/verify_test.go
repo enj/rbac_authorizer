@@ -72,6 +72,9 @@ func TestVerify_Rejects(t *testing.T) {
 			wantErr: "is not usable",
 		},
 		{
+			// A path that exists and is not a directory is reported as itself
+			// rather than folded in with a stat failure, which would leave the
+			// message wrapping a nil error.
 			name: "directory is a file",
 			setup: func(t *testing.T) string {
 				path := filepath.Join(t.TempDir(), "file")
@@ -81,7 +84,7 @@ func TestVerify_Rejects(t *testing.T) {
 				return path
 			},
 			goMod:   goMod,
-			wantErr: "is not usable",
+			wantErr: "is not a directory",
 		},
 		{
 			// The scratch module is what this pass decides the contents of, so a

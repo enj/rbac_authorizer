@@ -323,6 +323,11 @@ func TestStore_LoadCorrupt(t *testing.T) {
 	tests := []struct {
 		name     string
 		contents string
+		// wantErr names why the document had to be refused. The two syntax cases
+		// leave it empty because the wording there is the standard library
+		// decoder's rather than this engine's, and pinning prose no part of this
+		// repository controls would make the test fail on a toolchain bump.
+		wantErr string
 	}{
 		{
 			name:     "not json at all",
@@ -337,37 +342,57 @@ func TestStore_LoadCorrupt(t *testing.T) {
 			// recorded more than this version knows how to honour.
 			name:     "unknown field",
 			contents: `{"schema": 1, "entries": [], "policy": "v1-to-v0"}`,
+			wantErr:  `unknown field "policy"`,
 		},
 		{
 			name:     "unknown schema",
 			contents: `{"schema": 99, "entries": []}`,
+			wantErr:  "schema 99 is not 1",
 		},
 		{
 			name:     "no schema",
 			contents: `{"entries": []}`,
+			wantErr:  "schema 0 is not 1",
 		},
 		{
 			name:     "trailing content",
 			contents: `{"schema": 1, "entries": []}{"schema": 1, "entries": []}`,
+			wantErr:  "trailing content after the document",
 		},
 		{
+			// Both entries are complete and individually valid, so the repeated
+			// source is the only thing left to refuse them for. An entry missing a
+			// mandatory field would be rejected on its own before the index ever
+			// compared the two, and the duplicate path would go unexercised.
 			name: "one source recorded twice",
 			contents: `{"schema": 1, "entries": [
-				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1"}]},
-				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.2"}]}
+				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1", "commit": "` + stagingA + `"}]},
+				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.2", "commit": "` + stagingB + `"}]}
 			]}`,
+			wantErr: "already recorded with different versions",
 		},
 		{
 			name: "source is not an object name",
 			contents: `{"schema": 1, "entries": [
-				{"source": "abc", "modules": [{"path": "k8s.io/api", "version": "v0.36.1"}]}
+				{"source": "abc", "modules": [{"path": "k8s.io/api", "version": "v0.36.1", "commit": "` + stagingA + `"}]}
 			]}`,
+			wantErr: "must be 40 or 64 hexadecimal characters",
+		},
+		{
+			// Every pin names a commit, so a stored one without it records a
+			// version nothing can later re-verify.
+			name: "module has no staging commit",
+			contents: `{"schema": 1, "entries": [
+				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1"}]}
+			]}`,
+			wantErr: "staging commit",
 		},
 		{
 			name: "entry records no modules",
 			contents: `{"schema": 1, "entries": [
 				{"source": "` + sourceA + `", "modules": []}
 			]}`,
+			wantErr: "records no modules",
 		},
 	}
 
@@ -382,8 +407,15 @@ func TestStore_LoadCorrupt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new store: %v", err)
 			}
-			if _, err := store.Load(t.Context()); !errors.Is(err, gomodmap.ErrIndexCorrupt) {
-				t.Errorf("load: error = %v, want ErrIndexCorrupt", err)
+			_, err = store.Load(t.Context())
+			if !errors.Is(err, gomodmap.ErrIndexCorrupt) {
+				t.Fatalf("load: error = %v, want ErrIndexCorrupt", err)
+			}
+			// A corrupt document has to be refused for the reason the case is
+			// about. Checking only the sentinel would let a fixture that is
+			// malformed in some other way stand in for the case it is named after.
+			if test.wantErr != "" && !strings.Contains(err.Error(), test.wantErr) {
+				t.Errorf("load: error = %v, want it to contain %q", err, test.wantErr)
 			}
 		})
 	}

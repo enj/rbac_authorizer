@@ -111,6 +111,11 @@ func assertNamesTag(resolved gocli.Module, tag string) (string, error) {
 // both through the revision the version itself encodes and through the version
 // control origin the go command reports, so a version resolved from some other
 // commit is caught here rather than published.
+//
+// Every mapping has to name the same source commit, and the versions returned
+// carry no source of their own. They are recorded under one source commit, so a
+// set drawn from two of them would cache one commit's staging versions under
+// another commit's name, and nothing downstream holds enough to notice.
 func ResolveCommitVersions(ctx context.Context, runner *gocli.Runner, mappings []CommitMapping) ([]ModuleVersion, error) {
 	if len(mappings) == 0 {
 		return nil, errors.New("staging versions: at least one mapped module is required")
@@ -118,11 +123,22 @@ func ResolveCommitVersions(ctx context.Context, runner *gocli.Runner, mappings [
 	ordered := slices.Clone(mappings)
 	slices.SortFunc(ordered, func(a, b CommitMapping) int { return strings.Compare(a.ModulePath, b.ModulePath) })
 
+	// The shared source commit is validated once rather than only compared, so a
+	// set of mappings that agree on an unusable name is refused here instead of
+	// becoming the key an entry is cached under.
+	source := ordered[0].Source
+	if err := gitgraph.ValidateSHA(source); err != nil {
+		return nil, fmt.Errorf("staging versions: source commit: %w", err)
+	}
+
 	paths := make([]string, len(ordered))
 	queries := make([]string, len(ordered))
 	for i, mapping := range ordered {
 		if i > 0 && ordered[i-1].ModulePath == mapping.ModulePath {
 			return nil, fmt.Errorf("staging versions: module %s is mapped twice", mapping.ModulePath)
+		}
+		if mapping.Source != source {
+			return nil, fmt.Errorf("staging versions: module %s is mapped from source %s rather than %s", mapping.ModulePath, mapping.Source, source)
 		}
 		if mapping.Staging == "" {
 			return nil, fmt.Errorf("staging versions: module %s has no mapped commit", mapping.ModulePath)

@@ -118,6 +118,29 @@ func TestResolveCommitVersions_Rejects(t *testing.T) {
 			mappings: []gomodmap.CommitMapping{{ModulePath: "k8s.io/api", Source: sourceA}},
 			wantErr:  "has no mapped commit",
 		},
+		{
+			// The returned versions carry no source of their own, so a set drawn
+			// from two source commits would be cached under whichever one the
+			// caller happened to record it against.
+			name: "mappings disagree about the source",
+			mappings: []gomodmap.CommitMapping{
+				{ModulePath: "k8s.io/api", Source: sourceA, Staging: stagingA},
+				{ModulePath: "k8s.io/apimachinery", Source: sourceB, Staging: stagingB},
+			},
+			wantErr: "is mapped from source",
+		},
+		{
+			name:     "mapping has no source",
+			mappings: []gomodmap.CommitMapping{{ModulePath: "k8s.io/api", Staging: stagingA}},
+			wantErr:  "source commit",
+		},
+		{
+			// The source commit becomes the key an entry is cached under, so a
+			// name no object store could hold is refused before anything resolves.
+			name:     "source is not an object name",
+			mappings: []gomodmap.CommitMapping{{ModulePath: "k8s.io/api", Source: "abc", Staging: stagingA}},
+			wantErr:  "must be 40 or 64 hexadecimal characters",
+		},
 	}
 
 	for _, test := range tests {

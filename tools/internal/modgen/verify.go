@@ -108,8 +108,16 @@ func Verify(ctx context.Context, runner *gocli.Runner, opts VerifyOptions) (repo
 	if !filepath.IsAbs(opts.Dir) {
 		return nil, fmt.Errorf("verify generated module: directory %q must be absolute", opts.Dir)
 	}
-	if info, err := os.Stat(opts.Dir); err != nil || !info.IsDir() {
+	// The two ways a scratch directory can be unusable are reported separately.
+	// Folding them together would hand a nil error to %w for the path that exists
+	// and is not a directory, which renders as a formatting error and wraps
+	// nothing, so the one case an operator can act on would arrive unreadable.
+	info, err := os.Stat(opts.Dir)
+	if err != nil {
 		return nil, fmt.Errorf("verify generated module: directory %q is not usable: %w", opts.Dir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("verify generated module: %q is not a directory", opts.Dir)
 	}
 	modPath := filepath.Join(opts.Dir, "go.mod")
 	if _, err := os.Stat(modPath); err == nil {
