@@ -29,12 +29,13 @@ The approved design is [`plans/implementation.md`](plans/implementation.md). The
 
 ## Build and test commands
 
-The default GOPATH is read-only in this environment. Use writable caches:
+The default GOPATH is read-only, and `/Users/mo/.cache` is a 128 MB tmpfs that is too small for the Kubernetes module graph. Use the roomy workspace cache:
 
 ```text
-GOPATH=/Users/mo/.cache/gopath
-GOMODCACHE=/Users/mo/.cache/gopath/pkg/mod
-GOCACHE=/Users/mo/.cache/gobuild
+GOPATH=/Users/mo/claude/.gocache/gopath
+GOMODCACHE=/Users/mo/claude/.gocache/mod
+GOCACHE=/Users/mo/claude/.gocache/build
+GOLANGCI_LINT_CACHE=/Users/mo/claude/.gocache/lint
 ```
 
 Run from `tools/`:
