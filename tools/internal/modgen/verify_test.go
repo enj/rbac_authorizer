@@ -102,6 +102,22 @@ func TestVerify_Rejects(t *testing.T) {
 			wantErr: "the scratch module must be generated rather than reused",
 		},
 		{
+			// go.sum is refused for the same reason as go.mod and one more: this
+			// pass reads it back into the report, so a checksum file the caller
+			// left behind would be published as though tidying had produced it,
+			// and the cleanup on failure would delete a file the pass never wrote.
+			name: "checksum file already exists",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte("example.com/x v1.0.0 h1:deadbeef=\n"), 0o600); err != nil {
+					t.Fatalf("write go.sum: %v", err)
+				}
+				return dir
+			},
+			goMod:   goMod,
+			wantErr: "the scratch module must be generated rather than reused",
+		},
+		{
 			name:    "generated module does not parse",
 			setup:   func(t *testing.T) string { return t.TempDir() },
 			goMod:   []byte("this is not a go.mod\n"),
@@ -219,6 +235,44 @@ func TestVerify_LeavesNothingOnFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestVerify_KeepsCallerChecksums proves the refusal of a pre-existing go.sum
+// happens before anything is written, so the caller's file is still there
+// afterwards.
+//
+// The precondition and the cleanup are the same list of names. Were the check
+// ever to move after the module file is installed, the cleanup on the way out
+// would delete a checksum file this pass did not create, which is the one
+// outcome refusing the directory exists to prevent.
+func TestVerify_KeepsCallerChecksums(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	const checksums = "example.com/x v1.0.0 h1:deadbeef=\n"
+	sumPath := filepath.Join(dir, "go.sum")
+	if err := os.WriteFile(sumPath, []byte(checksums), 0o600); err != nil {
+		t.Fatalf("write go.sum: %v", err)
+	}
+
+	_, err := modgen.Verify(t.Context(), offlineRunner(t, dir), modgen.VerifyOptions{
+		Dir:   dir,
+		GoMod: generatedGoMod(t, gomodmap.Requirement{Path: "k8s.io/api", Version: "v0.36.1"}),
+	})
+	if err == nil {
+		t.Fatal("verify: got nil error, want a reused scratch module to be refused")
+	}
+
+	kept, err := os.ReadFile(sumPath) //nolint:gosec // the path is this test's own temporary file
+	if err != nil {
+		t.Fatalf("read go.sum: %v", err)
+	}
+	if string(kept) != checksums {
+		t.Errorf("go.sum = %q, want the caller's %q left untouched", kept, checksums)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		t.Error("verify wrote go.mod into a directory it refused")
 	}
 }
 

@@ -361,15 +361,17 @@ func TestStore_LoadCorrupt(t *testing.T) {
 		},
 		{
 			// Both entries are complete and individually valid, so the repeated
-			// source is the only thing left to refuse them for. An entry missing a
-			// mandatory field would be rejected on its own before the index ever
-			// compared the two, and the duplicate path would go unexercised.
+			// source is the only thing left to refuse them for. Load decides this
+			// itself rather than leaning on Put, so the divergent and identical
+			// shapes report the same document fault. Put's own conflict is covered
+			// at the index level by TestIndex_PutConflict and at the merge level by
+			// TestStore_SaveConflict.
 			name: "one source recorded twice",
 			contents: `{"schema": 1, "entries": [
 				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1", "commit": "` + stagingA + `"}]},
 				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.2", "commit": "` + stagingB + `"}]}
 			]}`,
-			wantErr: "already recorded with different versions",
+			wantErr: "recorded more than once",
 		},
 		{
 			name: "source is not an object name",
@@ -393,6 +395,19 @@ func TestStore_LoadCorrupt(t *testing.T) {
 				{"source": "` + sourceA + `", "modules": []}
 			]}`,
 			wantErr: "records no modules",
+		},
+		{
+			// Two copies that agree are refused as well. Put tolerates an
+			// identical repeat so a resumed run can replay an answer it already
+			// holds, but this engine writes one entry per source commit, so a
+			// document naming one twice was not written by it however consistent
+			// the copies are.
+			name: "one source recorded twice identically",
+			contents: `{"schema": 1, "entries": [
+				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1", "commit": "` + stagingA + `"}]},
+				{"source": "` + sourceA + `", "modules": [{"path": "k8s.io/api", "version": "v0.36.1", "commit": "` + stagingA + `"}]}
+			]}`,
+			wantErr: "recorded more than once",
 		},
 	}
 

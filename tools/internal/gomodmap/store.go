@@ -96,7 +96,19 @@ func (s *Store) Load(ctx context.Context) (*Index, error) {
 	}
 
 	index := NewIndex()
+	seen := make(map[string]bool, len(document.Entries))
 	for _, entry := range document.Entries {
+		// A repeated source is a defect of the document, decided here rather than
+		// left to Put. Put tolerates an identical repeat so a resumed run can
+		// replay an answer it already holds, and it refuses a divergent one for
+		// its own reason, so leaning on it would report two shapes of the same
+		// fault and would let the identical shape through entirely. This engine
+		// writes one entry per source commit, so a stored index naming one twice
+		// was not written by it however well the copies agree.
+		if seen[entry.Source] {
+			return nil, fmt.Errorf("version index %s: %w: source %s is recorded more than once", s.path, ErrIndexCorrupt, entry.Source)
+		}
+		seen[entry.Source] = true
 		if err := index.Put(entry); err != nil {
 			return nil, fmt.Errorf("version index %s: %w: %w", s.path, ErrIndexCorrupt, err)
 		}

@@ -72,8 +72,8 @@ type Reclassification struct {
 // VerifyOptions describes one verification pass.
 type VerifyOptions struct {
 	// Dir is the scratch module directory. It must already hold the extracted Go
-	// sources and must not already hold a go.mod, because this pass is what
-	// decides what that file says.
+	// sources and must hold neither a go.mod nor a go.sum, because this pass is
+	// what decides what those files say and what removes them again if it fails.
 	Dir string
 	// GoMod is the generated module file to install.
 	GoMod []byte
@@ -119,11 +119,20 @@ func Verify(ctx context.Context, runner *gocli.Runner, opts VerifyOptions) (repo
 	if !info.IsDir() {
 		return nil, fmt.Errorf("verify generated module: %q is not a directory", opts.Dir)
 	}
-	modPath := filepath.Join(opts.Dir, "go.mod")
-	if _, err := os.Stat(modPath); err == nil {
-		return nil, fmt.Errorf("verify generated module: %s already exists, the scratch module must be generated rather than reused", modPath)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("verify generated module: %w", err)
+	modPath := filepath.Join(opts.Dir, goModName)
+	// Every name this pass writes has to be absent first, not just go.mod. A
+	// go.sum the caller left behind would be read back into the report as though
+	// tidying had produced it, so a checksum this pass never computed would reach
+	// publication, and the cleanup below would delete a file the pass did not
+	// create. Refusing the directory outright is the only answer that neither
+	// publishes nor destroys someone else's state.
+	for _, name := range generatedNames {
+		path := filepath.Join(opts.Dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return nil, fmt.Errorf("verify generated module: %s already exists, the scratch module must be generated rather than reused", path)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("verify generated module: %w", err)
+		}
 	}
 
 	// The runner is pointed at the scratch module rather than trusted to already
@@ -177,7 +186,7 @@ func Verify(ctx context.Context, runner *gocli.Runner, opts VerifyOptions) (repo
 		return nil, fmt.Errorf("verify generated module: %w", err)
 	}
 
-	sum, err := os.ReadFile(filepath.Join(opts.Dir, "go.sum"))
+	sum, err := os.ReadFile(filepath.Join(opts.Dir, goSumName))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("verify generated module: %w", err)
 	}
@@ -218,6 +227,17 @@ func checkToolchain(file *modfile.File) error {
 	return nil
 }
 
+// The names one verification pass creates in the scratch module.
+const (
+	goModName = "go.mod"
+	goSumName = "go.sum"
+)
+
+// generatedNames lists them once. The precondition that refuses a reused
+// directory and the cleanup that empties a failed one both read this, so a name
+// that is written but not refused, or removed but never written, cannot appear.
+var generatedNames = []string{goModName, goSumName}
+
 // removeGenerated takes back the files one verification pass wrote.
 //
 // A file that is not there is not a failure: go.sum is absent whenever the
@@ -225,7 +245,7 @@ func checkToolchain(file *modfile.File) error {
 // either name.
 func removeGenerated(dir string) error {
 	var errs []error
-	for _, name := range []string{"go.mod", "go.sum"} {
+	for _, name := range generatedNames {
 		path := filepath.Join(dir, name)
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))

@@ -26,7 +26,6 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
-	"golang.org/x/mod/semver"
 
 	"github.com/enj/soapbox/tools/internal/buildinfo"
 	"github.com/enj/soapbox/tools/internal/gomodmap"
@@ -70,10 +69,20 @@ type Options struct {
 // External requirements are copied whole instead, because they are already exact
 // versions that cost nothing to carry and tidying removes the unused ones.
 //
+// A staging module the source only replaces is refused along with the rest. The
+// tree stages sample-cli-plugin and sample-controller so it publishes them, but
+// the root module requires neither, so upstream's own build never resolved a
+// version for either one. Turning such a replacement into a requirement would
+// have the generated module depend on code the source commit was never built
+// against, and the version it depended on would be one this engine chose rather
+// than one upstream did.
+//
 // Directness is the source module's marking, which is a starting point rather
 // than an answer. The generated module contains a fraction of the source's
 // packages, so tidying recomputes it, and Verify reports what it changed instead
-// of promising the source's marking survived.
+// of promising the source's marking survived. Refusing the unrequired staging
+// modules is also what makes that marking meaningful: a replacement carries no
+// requirement, so it has no direct or indirect marking to start from.
 func RequirementsFor(root *gomodmap.RootModule, staging []gomodmap.ModuleVersion) ([]gomodmap.Requirement, error) {
 	if root == nil {
 		return nil, errors.New("module requirements: a parsed source module is required")
@@ -86,6 +95,9 @@ func RequirementsFor(root *gomodmap.RootModule, staging []gomodmap.ModuleVersion
 		source, ok := root.StagingModuleOf(resolved.Path)
 		if !ok {
 			return nil, fmt.Errorf("module requirements: %s is not a staging module of %s", resolved.Path, root.Path)
+		}
+		if !source.Required {
+			return nil, fmt.Errorf("module requirements: staging module %s is replaced by %s but not required by it, so the source commit was never built against it", resolved.Path, root.Path)
 		}
 		if seen[resolved.Path] {
 			return nil, fmt.Errorf("module requirements: staging module %s is resolved twice", resolved.Path)
@@ -192,7 +204,11 @@ func checkRequirements(requirements []gomodmap.Requirement) ([]gomodmap.Requirem
 	ordered := slices.Clone(requirements)
 	slices.SortFunc(ordered, func(a, b gomodmap.Requirement) int { return cmp.Compare(a.Path, b.Path) })
 	for i, requirement := range ordered {
-		if err := checkExactVersion(requirement.Version); err != nil {
+		// The validator is gomodmap's rather than a second copy here. It decides
+		// what an exact version is for the resolved staging pins, and a generated
+		// module that applied a slightly different rule to the same values would
+		// accept a version the resolver had already refused, or the reverse.
+		if err := gomodmap.ValidateExactVersion(requirement.Version); err != nil {
 			return nil, fmt.Errorf("generated go.mod: requirement %s: %w", requirement.Path, err)
 		}
 		// Check validates the path and the version together, which is what
@@ -207,35 +223,6 @@ func checkRequirements(requirements []gomodmap.Requirement) ([]gomodmap.Requirem
 		}
 	}
 	return ordered, nil
-}
-
-// incompatibleSuffix marks a major version 2 or later module published without
-// the matching path suffix. It is the only build metadata a module version may
-// carry.
-const incompatibleSuffix = "+incompatible"
-
-// checkExactVersion refuses anything the go command would have to resolve.
-func checkExactVersion(version string) error {
-	switch {
-	case version == "":
-		return errors.New("a version is required")
-	case version == gomodmap.StagingVersion:
-		return fmt.Errorf("version %s is the source placeholder, which names no published module", version)
-	case !semver.IsValid(version):
-		return fmt.Errorf("version %q is not a semantic version", version)
-	}
-	// Reporting other build metadata as itself is more useful than reporting it
-	// as merely non canonical, which is what the check below would call it.
-	if build := semver.Build(strings.TrimSuffix(version, incompatibleSuffix)); build != "" {
-		return fmt.Errorf("version %q carries build metadata %q, which module versions may not", version, build)
-	}
-	// CanonicalVersion rather than semver.Canonical, because the latter strips
-	// +incompatible and would report a legitimate version as one that needs
-	// rewriting.
-	if canonical := module.CanonicalVersion(version); canonical != version {
-		return fmt.Errorf("version %q is not canonical, which would resolve to %q", version, canonical)
-	}
-	return nil
 }
 
 // checkGodebug validates and canonically orders the godebug defaults.

@@ -31,6 +31,97 @@ func scratchRunner(t *testing.T) *gocli.Runner {
 	return runner
 }
 
+// runnerInModule returns an offline runner rooted in a module with the given
+// go.mod, or in a directory with none when the text is empty.
+func runnerInModule(t *testing.T, goMod string) *gocli.Runner {
+	t.Helper()
+	dir := t.TempDir()
+	if goMod != "" {
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o600); err != nil {
+			t.Fatalf("write go.mod: %v", err)
+		}
+	}
+	runner, err := gocli.New(t.Context(), gocli.Options{
+		Dir:     dir,
+		Inherit: []string{"PATH"},
+		Proxy:   gocli.ProxyOff,
+	})
+	if err != nil {
+		t.Fatalf("create go runner: %v", err)
+	}
+	return runner
+}
+
+// TestResolveVersions_RejectsResolverModule proves the resolver refuses to run
+// anywhere but an isolated scratch module.
+//
+// go list -m answers in the context of a main module, so the module the runner
+// sits in decides part of the answer. A replacement resolves a version out of a
+// directory and an exclude quietly changes which version a query selects, and
+// neither is visible in the response as anything other than a different version.
+// The refusal has to happen before the query rather than be read back out of it.
+func TestResolveVersions_RejectsResolverModule(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		goMod   string
+		wantErr string
+	}{
+		{
+			name:    "no module at all",
+			goMod:   "",
+			wantErr: "resolver module",
+		},
+		{
+			name:    "module carries a replacement",
+			goMod:   "module soapbox.test/scratch\n\ngo 1.26.0\n\nreplace k8s.io/api => ./api\n",
+			wantErr: "replace directives",
+		},
+		{
+			name:    "module carries an exclude",
+			goMod:   "module soapbox.test/scratch\n\ngo 1.26.0\n\nexclude k8s.io/api v0.36.0\n",
+			wantErr: "exclude directives",
+		},
+		{
+			// A resolver sitting in one of the modules being resolved answers for
+			// it out of its own working tree rather than from the proxy.
+			name:    "module is one of the modules being resolved",
+			goMod:   "module k8s.io/api\n\ngo 1.26.0\n",
+			wantErr: "is itself k8s.io/api",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner := runnerInModule(t, test.goMod)
+
+			_, releaseErr := gomodmap.ResolveReleaseVersions(
+				t.Context(), runner, config.ReleasePolicyV1ToV0, "v1.36.1", []string{"k8s.io/api"},
+			)
+			if releaseErr == nil {
+				t.Fatalf("resolve release versions: got nil error, want %q", test.wantErr)
+			}
+			if !strings.Contains(releaseErr.Error(), test.wantErr) {
+				t.Errorf("resolve release versions: error = %v, want it to contain %q", releaseErr, test.wantErr)
+			}
+
+			// Both entry points funnel through the same check, so both have to
+			// refuse the same runner.
+			_, commitErr := gomodmap.ResolveCommitVersions(t.Context(), runner, []gomodmap.CommitMapping{
+				{ModulePath: "k8s.io/api", Source: sourceA, Staging: stagingA},
+			})
+			if commitErr == nil {
+				t.Fatalf("resolve commit versions: got nil error, want %q", test.wantErr)
+			}
+			if !strings.Contains(commitErr.Error(), test.wantErr) {
+				t.Errorf("resolve commit versions: error = %v, want it to contain %q", commitErr, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveReleaseVersions_Rejects(t *testing.T) {
 	t.Parallel()
 

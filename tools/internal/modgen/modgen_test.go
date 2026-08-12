@@ -418,9 +418,31 @@ replace k8s.io/api => ./staging/src/k8s.io/api
 	}
 }
 
+// replaceOnlyRoot parses a source module that stages a module without requiring
+// it, which is the shape Kubernetes really has for sample-cli-plugin and
+// sample-controller: replaced so the tree publishes them, imported by nothing in
+// the root module, so no requirement and no resolved version.
+func replaceOnlyRoot(t *testing.T) *gomodmap.RootModule {
+	t.Helper()
+	root, err := gomodmap.ParseRootModule("go.mod", []byte(`module k8s.io/kubernetes
+
+go 1.26.0
+
+require k8s.io/api v0.0.0
+
+replace (
+	k8s.io/api => ./staging/src/k8s.io/api
+	k8s.io/sample-controller => ./staging/src/k8s.io/sample-controller
+)
+`))
+	if err != nil {
+		t.Fatalf("parse root module: %v", err)
+	}
+	return root
+}
+
 func TestRequirementsFor_Rejects(t *testing.T) {
 	t.Parallel()
-
 	root, err := gomodmap.ParseRootModule("go.mod", []byte(`module k8s.io/kubernetes
 
 go 1.26.0
@@ -460,6 +482,16 @@ replace k8s.io/api => ./staging/src/k8s.io/api
 				{Path: "k8s.io/api", Version: "v0.36.2"},
 			},
 			wantErr: "is resolved twice",
+		},
+		{
+			// sample-controller is the real shape: staged so the tree publishes
+			// it, required by nothing, so upstream's own build never resolved a
+			// version for it. Requiring it here would have the generated module
+			// depend on code the source commit was never built against.
+			name:    "staging module is replaced but not required",
+			root:    replaceOnlyRoot(t),
+			staging: []gomodmap.ModuleVersion{{Path: "k8s.io/sample-controller", Version: "v0.36.1"}},
+			wantErr: "not required by it",
 		},
 	}
 

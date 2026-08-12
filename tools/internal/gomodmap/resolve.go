@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
 	"github.com/enj/soapbox/tools/internal/config"
@@ -31,6 +34,9 @@ var ErrVersionMismatch = errors.New("resolved version does not name the requeste
 // is v0.36.1 of every staging module. The mapping is still put to the go command
 // rather than assumed, because a tag this engine believes in but that was never
 // pushed would otherwise become a pin nothing can resolve.
+//
+// The runner must sit in an isolated scratch module: see checkResolverModule,
+// which refuses anything else before a version is resolved.
 func ResolveReleaseVersions(ctx context.Context, runner *gocli.Runner, policy, sourceTag string, modulePaths []string) ([]ModuleVersion, error) {
 	tag, err := config.MapReleaseTag(policy, sourceTag)
 	if err != nil {
@@ -116,6 +122,9 @@ func assertNamesTag(resolved gocli.Module, tag string) (string, error) {
 // carry no source of their own. They are recorded under one source commit, so a
 // set drawn from two of them would cache one commit's staging versions under
 // another commit's name, and nothing downstream holds enough to notice.
+//
+// The runner must sit in an isolated scratch module: see checkResolverModule,
+// which refuses anything else before a version is resolved.
 func ResolveCommitVersions(ctx context.Context, runner *gocli.Runner, mappings []CommitMapping) ([]ModuleVersion, error) {
 	if len(mappings) == 0 {
 		return nil, errors.New("staging versions: at least one mapped module is required")
@@ -238,11 +247,61 @@ func originOf(resolved gocli.Module) (*gocli.ModuleOrigin, error) {
 // release means dozens of queries, and the go command amortises proxy round
 // trips across a single invocation.
 func resolveQueries(ctx context.Context, runner *gocli.Runner, paths, queries []string) (map[string]gocli.Module, error) {
+	if err := checkResolverModule(runner, paths); err != nil {
+		return nil, err
+	}
 	modules, err := runner.ListModules(ctx, queries...)
 	if err != nil {
 		return nil, err
 	}
 	return indexResolved(paths, modules)
+}
+
+// checkResolverModule refuses a runner whose own module could answer for the
+// modules being resolved.
+//
+// go list -m answers in the context of a main module, so the module the runner
+// sits in is part of the question rather than a detail of where it runs. A
+// replace directive there redirects a version query onto a directory, an exclude
+// removes a version from selection, and a main module that is itself one of the
+// modules being asked about answers out of its own working tree.
+//
+// indexResolved catches the replacement and the main module as symptoms, but
+// only once a query has already gone out, and an exclude leaves no trace in the
+// response at all: the answer is simply a different version, indistinguishable
+// from the one the proxy would otherwise have given. So the requirement is
+// stated up front instead. The resolver runs in an isolated scratch module that
+// declares nothing, and a runner pointed anywhere else is refused before a
+// single version is resolved.
+func checkResolverModule(runner *gocli.Runner, paths []string) error {
+	dir := runner.Dir()
+	if dir == "" {
+		return errors.New("resolver module: the runner needs a scratch module directory")
+	}
+	// The path is the runner's own working directory rather than anything an
+	// input named, and it is the file the go command is about to read as its main
+	// module.
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod")) //nolint:gosec // the directory is the runner's own
+	if err != nil {
+		return fmt.Errorf("resolver module: %w", err)
+	}
+	parsed, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return fmt.Errorf("resolver module %s: %w", dir, err)
+	}
+	if parsed.Module == nil {
+		return fmt.Errorf("resolver module %s: a module directive is required", dir)
+	}
+	if len(parsed.Replace) > 0 {
+		return fmt.Errorf("resolver module %s: carries %d replace directives, which would resolve a staging version out of a directory", dir, len(parsed.Replace))
+	}
+	if len(parsed.Exclude) > 0 {
+		return fmt.Errorf("resolver module %s: carries %d exclude directives, which silently change which version a query selects", dir, len(parsed.Exclude))
+	}
+	if main := parsed.Module.Mod.Path; slices.Contains(paths, main) {
+		return fmt.Errorf("resolver module %s: is itself %s, which it would answer for out of its own tree", dir, main)
+	}
+	return nil
 }
 
 // indexResolved matches a batched response back onto the modules it was asked
