@@ -113,6 +113,7 @@ func TestEngineNeverDisablesTLSVerification(t *testing.T) {
 func TestSubprocessExecutionStaysInsideItsBoundary(t *testing.T) {
 	allowed := map[string]bool{
 		"internal/gitcli": true,
+		"internal/gocli":  true,
 		"internal/doctor": true,
 	}
 	forEachFile(t, func(t *testing.T, path string, fset *token.FileSet, file *ast.File) {
@@ -122,7 +123,7 @@ func TestSubprocessExecutionStaysInsideItsBoundary(t *testing.T) {
 				continue
 			}
 			if !allowed[filepath.ToSlash(filepath.Dir(path))] {
-				t.Errorf("%s: os/exec may only be imported by the git and doctor boundaries", position(fset, spec))
+				t.Errorf("%s: os/exec may only be imported by the git, go, and doctor boundaries", position(fset, spec))
 			}
 		}
 	})

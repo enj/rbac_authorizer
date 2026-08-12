@@ -36,6 +36,11 @@ func TestSoapboxPolicy(t *testing.T) {
 	if !policy.MinimumGit.AtLeast(gitcli.Version{Major: 2, Minor: 34}) {
 		t.Fatalf("minimum git %v predates SSH signing support", policy.MinimumGit)
 	}
+	// The floor is the engine's own, not a second number that can drift below
+	// what every git command in gitcli is proved against.
+	if policy.MinimumGit != gitcli.MinimumVersion() {
+		t.Fatalf("minimum git %v is not gitcli's floor %v", policy.MinimumGit, gitcli.MinimumVersion())
+	}
 	if policy.Toolchain != "go1.26.5" {
 		t.Fatalf("toolchain = %q", policy.Toolchain)
 	}

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -63,7 +64,26 @@ const (
 // MinimumVersion reports the oldest Git release this package supports. It is
 // exported so the preflight check and the engine's doctor report a single
 // number rather than two that can drift apart.
+//
+// The floor is set by GIT_NO_LAZY_FETCH, so it is that capability's version
+// rather than a number of its own.
 func MinimumVersion() Version {
+	return MinimumNoLazyFetchVersion()
+}
+
+// MinimumNoLazyFetchVersion is the oldest Git release that documents and
+// honours GIT_NO_LAZY_FETCH.
+//
+// It is exported because more than one caller has to enforce it and they must
+// not each carry a number of their own: offline materialisation refuses to run
+// below it, and the doctor reports it. The provenance is in the package's
+// version comment above.
+//
+// The number matters less than the behaviour, which is why
+// TestNoLazyFetchIsHonoured exercises the variable against the git the tests
+// actually run. An older git ignores it rather than rejecting it, so a floor
+// that is wrong fails silently, by reaching the network, rather than loudly.
+func MinimumNoLazyFetchVersion() Version {
 	return Version{Major: minimumVersionMajor, Minor: minimumVersionMinor}
 }
 
@@ -123,6 +143,9 @@ type Options struct {
 	// Secrets holds additional exact values that must never appear in captured
 	// output.
 	Secrets []string
+	// OutputLimit bounds the bytes one command may return on a stream. Zero
+	// means DefaultOutputLimit and a negative value is rejected.
+	OutputLimit int64
 }
 
 // Runner executes Git commands with a controlled environment.
@@ -142,7 +165,13 @@ type Runner struct {
 	// isolation is retained for the same reason: it has to survive Anonymous.
 	isolation []string
 	anonymous bool
-	redactor  *Redactor
+	// noLazyFetch pins GIT_NO_LAZY_FETCH onto every command. It is a field
+	// rather than an environment entry so that it survives Anonymous and cannot
+	// be shadowed by a caller entry.
+	noLazyFetch bool
+	// outputLimit bounds what one command may return on a stream.
+	outputLimit int64
+	redactor    *Redactor
 }
 
 // New resolves the Git executable and builds the subprocess environment.
@@ -166,26 +195,34 @@ func New(ctx context.Context, opts Options) (*Runner, error) {
 			return nil, err
 		}
 	}
-	for _, entry := range opts.Isolation {
-		if err := validateEnvEntry("isolation entry", entry); err != nil {
+	for i, entry := range opts.Isolation {
+		if err := validateEnvEntry("isolation entry", i, entry); err != nil {
 			return nil, fmt.Errorf("git runner: %w", err)
 		}
 	}
-	for _, entry := range opts.Env {
-		if err := validateEnvEntry("environment entry", entry); err != nil {
+	for i, entry := range opts.Env {
+		if err := validateEnvEntry("environment entry", i, entry); err != nil {
 			return nil, fmt.Errorf("git runner: %w", err)
 		}
+	}
+	limit := opts.OutputLimit
+	switch {
+	case limit < 0:
+		return nil, fmt.Errorf("git runner: output limit %d must not be negative", limit)
+	case limit == 0:
+		limit = DefaultOutputLimit
 	}
 	inherited := inheritedEnv(opts.Inherit)
 	isolation := slices.Clone(opts.Isolation)
 	return &Runner{
-		binary:    binary,
-		dir:       opts.Dir,
-		env:       assembleEnv(inherited, isolation, opts.Env),
-		inherited: inherited,
-		isolation: isolation,
-		anonymous: len(opts.Env) == 0,
-		redactor:  NewRedactor(append(envValues(opts.Env), opts.Secrets...)...),
+		binary:      binary,
+		dir:         opts.Dir,
+		env:         assembleEnv(inherited, isolation, opts.Env),
+		inherited:   inherited,
+		isolation:   isolation,
+		anonymous:   len(opts.Env) == 0,
+		outputLimit: limit,
+		redactor:    NewRedactor(append(envValues(opts.Env), opts.Secrets...)...),
 	}, nil
 }
 
@@ -203,13 +240,20 @@ func validateDirectory(kind, dir string) error {
 
 // validateEnvEntry rejects an entry that is not a KEY=VALUE pair, which would
 // otherwise reach the subprocess as an unnamed value or silently shadow nothing.
-func validateEnvEntry(kind, entry string) error {
+//
+// An entry with no separator is reported by its position rather than quoted.
+// The whole entry is the value in that case, an Env entry is where credentials
+// arrive, and this runs before the redactor that would have masked it exists, so
+// quoting it is the one way a token could reach a log through this package. Once
+// a name is known it is safe to name: the name is chosen by the caller and the
+// value is never echoed.
+func validateEnvEntry(kind string, index int, entry string) error {
 	name, _, ok := strings.Cut(entry, "=")
 	switch {
 	case !ok:
-		return fmt.Errorf("%s %q must be KEY=VALUE", kind, name)
+		return fmt.Errorf("%s %d must be KEY=VALUE", kind, index)
 	case name == "":
-		return fmt.Errorf("%s must name a variable", kind)
+		return fmt.Errorf("%s %d must name a variable", kind, index)
 	case strings.ContainsRune(entry, '\x00'):
 		return fmt.Errorf("%s %q must not contain a null byte", kind, name)
 	}
@@ -293,13 +337,41 @@ func discoveryCeiling(dir string) (string, error) {
 //
 // Isolation entries are kept. They decide where Git looks for state rather than
 // granting access to anything, and a run that redirected HOME away from
-// operator configuration must stay redirected when it reaches the network.
+// operator configuration must stay redirected when it reaches the network. A
+// no lazy fetch pin is kept for the same reason: dropping credentials must not
+// also drop a refusal to reach the network.
 func (r *Runner) Anonymous() *Runner {
 	clone := *r
 	clone.env = assembleEnv(r.inherited, r.isolation, nil)
 	clone.anonymous = true
 	return &clone
 }
+
+// WithNoLazyFetch returns a copy of the runner that refuses to download objects
+// from a promisor remote.
+//
+// This is the intrinsic form of the guarantee. Passing GIT_NO_LAZY_FETCH to one
+// command protects that command; pinning it to a runner protects every command
+// the runner will ever issue, including the ones that reach the object store
+// without looking like it. A checkout, a reset, or a diff in a blobless clone
+// will each happily fetch what they are missing, and none of them takes an
+// option that says otherwise.
+//
+// The pin is a property of the runner rather than an environment entry a caller
+// supplies, so there is no general override to reopen: it survives Anonymous,
+// it cannot be shadowed by a later Env entry, and it is applied after everything
+// else when the command is built. A call that explicitly asks for a lazy fetch
+// on a pinned runner is refused rather than quietly ignored.
+//
+// It requires a Git that honours the variable. See MinimumNoLazyFetchVersion.
+func (r *Runner) WithNoLazyFetch() *Runner {
+	clone := *r
+	clone.noLazyFetch = true
+	return &clone
+}
+
+// IsNoLazyFetch reports whether the runner refuses promisor fetches.
+func (r *Runner) IsNoLazyFetch() bool { return r.noLazyFetch }
 
 // IsAnonymous reports whether the runner carries no caller supplied environment
 // entries. Source acquisition asserts this before it reaches the network.
@@ -388,32 +460,128 @@ func (r *Runner) runInput(ctx context.Context, stdin []byte, extraEnv []string, 
 	return out, err
 }
 
+// runRaw executes one Git command and returns its standard output exactly as
+// git produced it.
+//
+// It exists for the commands that read upstream content rather than
+// diagnostics. A commit message, an author identity, and a trailer are replayed
+// into published history byte for byte, so passing them through the redactor
+// would rewrite the history the engine exists to reproduce, and it would do it
+// silently: the run would succeed and the published commit would simply not be
+// the upstream one. The same reasoning keeps ReadBlob's bytes untouched.
+//
+// Standard error and every error this returns are still redacted, because those
+// are diagnostics rather than content.
+func (r *Runner) runRaw(ctx context.Context, stdin []byte, args ...string) (string, error) {
+	var stdout bytes.Buffer
+	_, err := r.runOutput(ctx, stdin, nil, &stdout, args...)
+	return stdout.String(), err
+}
+
 // runCapture executes one Git command and returns both redacted streams.
 //
 // Standard error is returned on success as well as on failure, because some of
 // git's most consequential verdicts are warnings: a server that ignored the
 // object filter and sent a complete history says so there and exits zero.
+func (r *Runner) runCapture(ctx context.Context, stdin []byte, extraEnv []string, args ...string) (string, string, error) {
+	stdout := &boundedBuffer{limit: r.outputLimit}
+	outWriter := r.redactor.Writer(stdout)
+	stderr, runErr := r.runOutput(ctx, stdin, extraEnv, outWriter, args...)
+	closeErr := outWriter.Close()
+	if closeErr != nil {
+		closeErr = fmt.Errorf("git output capture: %w", closeErr)
+	}
+	if runErr == nil {
+		// A truncated stream is reported rather than parsed, because a parser
+		// handed the first half of a response would report a shape error and
+		// hide what actually happened.
+		runErr = stdout.overflow("standard output")
+		if runErr != nil {
+			runErr = fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), runErr)
+		}
+	}
+	return stdout.String(), stderr, errors.Join(runErr, closeErr)
+}
+
+// DefaultOutputLimit bounds one stream of one command. An upstream repository
+// decides how much a git command prints, so an unbounded capture would let it
+// decide how much memory the engine spends. It is generous enough for a full
+// history walk over a repository the size of Kubernetes and small enough that a
+// runaway command fails instead of exhausting memory.
+const DefaultOutputLimit = 512 << 20
+
+// boundedBuffer accumulates output up to a limit and remembers that it stopped.
+//
+// It keeps accepting writes after the limit so the pipe drains and the command
+// exits on its own; what it stops doing is retaining them. gocli carries its own
+// copy for the same reason it carries its own ExecError: the two boundaries are
+// deliberately parallel rather than sharing a private type across a package
+// edge that only goes one way.
+type boundedBuffer struct {
+	limit   int64
+	written int64
+	buffer  bytes.Buffer
+}
+
+// Write retains what fits and counts the rest.
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	remaining := b.limit - b.written
+	b.written += int64(len(p))
+	if remaining >= int64(len(p)) {
+		return b.buffer.Write(p)
+	}
+	if remaining > 0 {
+		if _, err := b.buffer.Write(p[:remaining]); err != nil {
+			return 0, fmt.Errorf("buffer git output: %w", err)
+		}
+	}
+	return len(p), nil
+}
+
+// String reports what was retained.
+func (b *boundedBuffer) String() string { return b.buffer.String() }
+
+// overflow reports the limit being passed, naming the stream.
+func (b *boundedBuffer) overflow(stream string) error {
+	if b.written <= b.limit {
+		return nil
+	}
+	return fmt.Errorf("%s reached %d bytes, past the %d byte limit", stream, b.written, b.limit)
+}
+
+// runOutput executes one Git command, writing its standard output to out, and
+// returns the redacted standard error.
+//
+// Standard output reaches out exactly as git produced it. Redaction is the
+// caller's decision because the two kinds of output need opposite handling:
+// runCapture wraps out in a redacting writer because it is reading diagnostics,
+// while ReadBlob does not, because rewriting bytes that merely happen to match a
+// secret would corrupt the file the engine is about to parse.
 //
 // The input is an in memory slice rather than an inherited descriptor, so a
 // subprocess can never read from the operator's terminal and a command that
 // exits early cannot leave the engine blocked on a pipe.
-func (r *Runner) runCapture(ctx context.Context, stdin []byte, extraEnv []string, args ...string) (string, string, error) {
-	var stdout, stderr bytes.Buffer
-	outWriter := r.redactor.Writer(&stdout)
-	errWriter := r.redactor.Writer(&stderr)
+func (r *Runner) runOutput(ctx context.Context, stdin []byte, extraEnv []string, out io.Writer, args ...string) (string, error) {
+	stderr := &boundedBuffer{limit: r.outputLimit}
+	errWriter := r.redactor.Writer(stderr)
 
 	full := append(append([]string{}, fixedConfig...), args...)
 	cmd := exec.CommandContext(ctx, r.binary, full...)
 	cmd.Dir = r.dir
 	cmd.Env = r.env
-	if r.ceiling != "" || len(extraEnv) > 0 {
+	if r.ceiling != "" || r.noLazyFetch || len(extraEnv) > 0 {
 		env := slices.Clone(r.env)
 		if r.ceiling != "" {
 			env = append(env, "GIT_CEILING_DIRECTORIES="+r.ceiling)
 		}
-		cmd.Env = append(env, extraEnv...)
+		env = append(env, extraEnv...)
+		// The pin is applied last so no per command entry can shadow it.
+		if r.noLazyFetch {
+			env = append(env, noLazyFetch)
+		}
+		cmd.Env = env
 	}
-	cmd.Stdout = outWriter
+	cmd.Stdout = out
 	cmd.Stderr = errWriter
 	cmd.Stdin = nil
 	if stdin != nil {
@@ -422,29 +590,26 @@ func (r *Runner) runCapture(ctx context.Context, stdin []byte, extraEnv []string
 	cmd.WaitDelay = commandWaitDelay
 
 	runErr := cmd.Run()
-	closeErr := errors.Join(outWriter.Close(), errWriter.Close())
+	closeErr := errWriter.Close()
 	if closeErr != nil {
 		closeErr = fmt.Errorf("git output capture: %w", closeErr)
 	}
 	if runErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return stdout.String(), stderr.String(), errors.Join(fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), ctxErr), closeErr)
+			return stderr.String(), errors.Join(fmt.Errorf("git %s: %w", strings.Join(r.redactor.Strings(args), " "), ctxErr), closeErr)
 		}
 		exitCode := -1
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
-		return stdout.String(), stderr.String(), errors.Join(&ExecError{
+		return stderr.String(), errors.Join(&ExecError{
 			Args:     r.redactor.Strings(args),
 			ExitCode: exitCode,
 			Stderr:   stderr.String(),
 			Err:      runErr,
 		}, closeErr)
 	}
-	if closeErr != nil {
-		return stdout.String(), stderr.String(), closeErr
-	}
-	return stdout.String(), stderr.String(), nil
+	return stderr.String(), closeErr
 }
 
 // Version is a parsed Git or Go release version.
@@ -655,7 +820,10 @@ type Trailer struct {
 
 // Commit is the metadata the engine needs about one commit.
 type Commit struct {
-	SHA             string
+	SHA string
+	// Parents are the parent object names in git's order, so Parents[0] is the
+	// first parent and defines the mainline. A root commit has none.
+	Parents         []string
 	AuthorName      string
 	AuthorEmail     string
 	AuthorDate      string
@@ -694,42 +862,196 @@ func (c Commit) TrailerValues(key string) []string {
 	return values
 }
 
-// commitFormat requests every commit field in one pass, separated by null
-// bytes so that multi line values cannot be confused with field boundaries.
-const commitFormat = "%H%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%G?%x00%GK%x00%GS%x00%s%x00%B%x00%(trailers:only=true,unfold=true)"
-
-// commitFieldCount is the number of fields commitFormat produces.
-const commitFieldCount = 13
+// One commit is rendered as a fixed number of null separated fields. Null is
+// the separator because every other candidate can appear inside a commit
+// message, and the count is fixed so a record boundary is arithmetic rather
+// than a guess about where a message ended.
+//
+// The three signature fields are a hole rather than a placeholder in the batch
+// form. %G? makes git verify the signature, which runs a verifier per signed
+// commit and answers from whatever keys the machine happens to trust, so a walk
+// over thousands of commits would pay for a verdict it did not ask for and would
+// return a different answer on a different machine. Leaving the slots empty
+// keeps the record shape, and therefore the parser and the field count,
+// identical either way.
+const (
+	commitFieldsIdentity  = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI"
+	commitFieldsSigned    = "%x00%G?%x00%GK%x00%GS"
+	commitFieldsUnsigned  = "%x00%x00%x00"
+	commitFieldsMessage   = "%x00%s%x00%B%x00%(trailers:only=true,unfold=true)"
+	commitFormat          = commitFieldsIdentity + commitFieldsSigned + commitFieldsMessage
+	commitFormatUnsigned  = commitFieldsIdentity + commitFieldsUnsigned + commitFieldsMessage
+	commitFieldCount      = 14
+	commitObjectNameField = 0
+)
 
 // CommitInfo reads metadata, signature status, and trailers for one revision.
 func (r *Runner) CommitInfo(ctx context.Context, revision string) (Commit, error) {
 	if err := validateArgument("revision", revision); err != nil {
 		return Commit{}, fmt.Errorf("git commit metadata: %w", err)
 	}
-	out, err := r.run(ctx, "log", "-1", "--no-patch", "--format="+commitFormat, "--end-of-options", revision, "--")
+	// The message, identities, and trailers are upstream content that is
+	// replayed verbatim, so this read bypasses the redactor.
+	out, err := r.runRaw(ctx, nil, "log", "-z", "-1", "--no-patch", "--format="+commitFormat, "--end-of-options", revision, "--")
 	if err != nil {
 		return Commit{}, fmt.Errorf("git commit metadata for %q: %w", r.redactor.String(revision), err)
 	}
-	fields := strings.SplitN(out, "\x00", commitFieldCount)
-	if len(fields) != commitFieldCount {
-		return Commit{}, fmt.Errorf("git commit metadata for %q: got %d fields, want %d", r.redactor.String(revision), len(fields), commitFieldCount)
+	commits, err := parseCommitRecords(out)
+	if err != nil {
+		return Commit{}, fmt.Errorf("git commit metadata for %q: %w", r.redactor.String(revision), err)
 	}
-	commit := Commit{
-		SHA:             fields[0],
-		AuthorName:      fields[1],
-		AuthorEmail:     fields[2],
-		AuthorDate:      fields[3],
-		CommitterName:   fields[4],
-		CommitterEmail:  fields[5],
-		CommitterDate:   fields[6],
-		SignatureStatus: fields[7],
-		SignerKey:       fields[8],
-		Signer:          fields[9],
-		Subject:         fields[10],
-		RawMessage:      fields[11],
-		Trailers:        parseTrailers(fields[12]),
+	if len(commits) != 1 {
+		return Commit{}, fmt.Errorf("git commit metadata for %q: got %d records, want 1", r.redactor.String(revision), len(commits))
 	}
-	return commit, nil
+	return commits[0], nil
+}
+
+// CommitLogOptions selects the commits one batched metadata read covers.
+type CommitLogOptions struct {
+	// Include lists the revisions to walk from, such as branch tips.
+	Include []string
+	// Exclude lists the revisions whose ancestors are left out, which is how a
+	// walk is bounded below by an already mapped commit.
+	Exclude []string
+	// FirstParent follows only the first parent of every merge, which yields the
+	// mainline of a branch.
+	FirstParent bool
+	// MaxCount bounds the number of commits returned. Zero means no bound.
+	MaxCount int
+	// Signatures fills SignatureStatus, SignerKey, and Signer. They are empty
+	// without it, because verifying every commit in a walk is neither free nor
+	// reproducible across machines. Ask for one commit's signature with
+	// CommitInfo instead unless the whole walk genuinely needs it.
+	Signatures bool
+}
+
+// CommitLog reads metadata, messages, and trailers for a range of commits in one
+// subprocess.
+//
+// This is the batched form of CommitInfo, and batching is the point: mapping a
+// source history onto a published one reads tens of thousands of commits, and a
+// process per commit would dominate every other cost in the engine.
+//
+// The order is git's own reverse topological order, parents before children,
+// which matches CommitGraph so a caller can zip the two together. It is not a
+// date order, because commit dates in an imported history are rebase and
+// attacker controlled.
+//
+// MaxCount is applied before the reversal, exactly as git applies it: a bounded
+// walk returns the newest commits presented oldest first, not the oldest ones.
+func (r *Runner) CommitLog(ctx context.Context, opts CommitLogOptions) ([]Commit, error) {
+	if len(opts.Include) == 0 {
+		return nil, errors.New("git log: at least one revision is required")
+	}
+	for _, revision := range opts.Include {
+		if err := validateRevision(revision); err != nil {
+			return nil, fmt.Errorf("git log: %w", err)
+		}
+	}
+	for _, revision := range opts.Exclude {
+		if err := validateRevision(revision); err != nil {
+			return nil, fmt.Errorf("git log: %w", err)
+		}
+	}
+	if opts.MaxCount < 0 {
+		return nil, fmt.Errorf("git log: max count %d must not be negative", opts.MaxCount)
+	}
+
+	format := commitFormatUnsigned
+	if opts.Signatures {
+		format = commitFormat
+	}
+	args := []string{"log", "-z", "--no-patch", "--topo-order", "--reverse", "--format=" + format}
+	if opts.FirstParent {
+		args = append(args, "--first-parent")
+	}
+	if opts.MaxCount > 0 {
+		args = append(args, "--max-count="+strconv.Itoa(opts.MaxCount))
+	}
+	args = append(args, "--end-of-options")
+	args = append(args, opts.Include...)
+	for _, revision := range opts.Exclude {
+		args = append(args, "^"+revision)
+	}
+	// The trailing separator keeps a revision that happens to match a file name
+	// from being read as a path.
+	args = append(args, "--")
+
+	// Same as CommitInfo: this reads content, not diagnostics.
+	out, err := r.runRaw(ctx, nil, args...)
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w", err)
+	}
+	commits, err := parseCommitRecords(out)
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w", err)
+	}
+	return commits, nil
+}
+
+// parseCommitRecords splits null delimited commit records into commits.
+//
+// With -z git terminates every entry with a null byte and ends the whole stream
+// with a trailing newline, so the fields of every commit are a fixed size window
+// into one split. Both the trimmed newline and the empty token the final
+// terminator leaves behind are load bearing: without either, the last record
+// would carry a stray field and the count would stop dividing evenly.
+//
+// Null is the only byte a commit message cannot hold. git refuses to write one
+// ("a NUL byte in commit log message not allowed"), so a stream that does not
+// divide evenly into records, or whose record does not begin with an object
+// name, means the objects themselves are corrupt. That is reported as
+// unparseable rather than silently misattributed to the wrong commit.
+func parseCommitRecords(out string) ([]Commit, error) {
+	out = strings.TrimSuffix(out, "\n")
+	if out == "" {
+		return nil, nil
+	}
+	fields := strings.Split(out, "\x00")
+	if last := len(fields) - 1; fields[last] == "" {
+		fields = fields[:last]
+	}
+	if len(fields)%commitFieldCount != 0 {
+		return nil, fmt.Errorf("got %d fields, want a multiple of %d", len(fields), commitFieldCount)
+	}
+	commits := make([]Commit, 0, len(fields)/commitFieldCount)
+	for start := 0; start < len(fields); start += commitFieldCount {
+		record := fields[start : start+commitFieldCount]
+		if !isObjectName(record[commitObjectNameField]) {
+			return nil, fmt.Errorf("record %d does not begin with an object name", start/commitFieldCount)
+		}
+		commits = append(commits, Commit{
+			SHA:             record[0],
+			Parents:         strings.Fields(record[1]),
+			AuthorName:      record[2],
+			AuthorEmail:     record[3],
+			AuthorDate:      record[4],
+			CommitterName:   record[5],
+			CommitterEmail:  record[6],
+			CommitterDate:   record[7],
+			SignatureStatus: record[8],
+			SignerKey:       record[9],
+			Signer:          record[10],
+			Subject:         record[11],
+			RawMessage:      record[12],
+			Trailers:        parseTrailers(record[13]),
+		})
+	}
+	return commits, nil
+}
+
+// isObjectName reports whether value is a full lowercase hexadecimal object
+// name in either hash algorithm.
+func isObjectName(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // parseTrailers splits unfolded trailer lines into key and value pairs.
@@ -756,7 +1078,7 @@ func parseTrailers(block string) []Trailer {
 // part. It reads no repository, so it works anywhere, and it is the reference
 // the pure implementation in gitgraph is checked against.
 func (r *Runner) ParseTrailers(ctx context.Context, message string) ([]Trailer, error) {
-	out, err := r.runInput(ctx, []byte(message), nil, "interpret-trailers", "--parse")
+	out, err := r.runRaw(ctx, []byte(message), "interpret-trailers", "--parse")
 	if err != nil {
 		return nil, fmt.Errorf("git interpret-trailers: %w", err)
 	}

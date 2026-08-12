@@ -6,7 +6,8 @@
 # missing lint binary can weaken them:
 #
 #  1. Maintained executable logic is Go. No command may be composed through sh,
-#     bash, or -c, and os/exec is confined to the git and doctor boundaries.
+#     bash, or -c, and os/exec is confined to the git, go, and doctor
+#     boundaries.
 #  2. TLS certificate verification is never disabled.
 #
 # Tool pinning: the linter is not pinned through a Go tool directive. Doing so
@@ -51,10 +52,11 @@ linters:
           files:
             - $all
             - "!**/internal/gitcli/*.go"
+            - "!**/internal/gocli/*.go"
             - "!**/internal/doctor/*.go"
           deny:
             - pkg: os/exec
-              desc: subprocess execution belongs in internal/gitcli, which is the only Git and credential boundary
+              desc: subprocess execution belongs in internal/gitcli and internal/gocli, which are the only Git, Go toolchain, and credential boundaries
         no-shell-helpers:
           files:
             - $all
@@ -111,9 +113,10 @@ linters:
       - comments
       - std-error-handling
     rules:
-      # internal/gitcli and internal/doctor are the only packages allowed to
-      # start processes, so the subprocess audit is expected to fire there.
-      - path: internal/(gitcli|doctor)/
+      # internal/gitcli, internal/gocli, and internal/doctor are the only
+      # packages allowed to start processes, so the subprocess audit is expected
+      # to fire there.
+      - path: internal/(gitcli|gocli|doctor)/
         linters:
           - gosec
         text: G204

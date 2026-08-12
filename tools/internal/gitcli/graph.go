@@ -25,6 +25,10 @@ var ErrAmbiguousMergeBase = errors.New("revisions have more than one best common
 // object store, not silently download the history it is asking about.
 const noLazyFetch = "GIT_NO_LAZY_FETCH=1"
 
+// ErrLazyFetchDisabled reports a request for a promisor fetch on a runner that
+// was pinned against one by WithNoLazyFetch.
+var ErrLazyFetchDisabled = errors.New("this runner refuses promisor fetches")
+
 // DAGCommit is one node of a commit graph: an object name and the parents that
 // define its edges. Nothing else is read, because the traversal that selects
 // commits must not depend on message or tree contents.
@@ -318,6 +322,29 @@ type ObjectInfoOptions struct {
 	AllowLazyFetch bool
 }
 
+// assertLazyFetchAllowed gates the promisor transfer a lazy fetch performs.
+//
+// A lazy fetch is a fetch. It reaches the promisor remote, which for the source
+// cache is the public upstream, so it carries exactly what CloneSource and
+// FetchSource are gated against: a credential must never travel to that host,
+// and the repository's own configuration must never decide where the objects
+// come from. The only difference is that git performs it implicitly, in the
+// middle of what reads like a local lookup, which is why the gate belongs at
+// every call that permits one.
+func (r *Runner) assertLazyFetchAllowed(ctx context.Context) error {
+	// A runner pinned by WithNoLazyFetch has already answered this question. The
+	// request is refused rather than silently downgraded, because a caller that
+	// asked for the network and got a local answer would read the resulting
+	// "missing object" as a fact about the repository.
+	if r.noLazyFetch {
+		return ErrLazyFetchDisabled
+	}
+	if err := r.assertAnonymous(); err != nil {
+		return err
+	}
+	return r.assertNoRemoteRewrites(ctx)
+}
+
 // ObjectInfoBatch describes many objects in one subprocess. Batching matters for
 // a blobless clone, where the alternative is one round trip per object.
 func (r *Runner) ObjectInfoBatch(ctx context.Context, opts ObjectInfoOptions) ([]ObjectInfo, error) {
@@ -340,18 +367,18 @@ func (r *Runner) ObjectInfoBatch(ctx context.Context, opts ObjectInfoOptions) ([
 	}
 
 	var env []string
+	args := []string{"cat-file", "--batch-check", "--buffer"}
 	if opts.AllowLazyFetch {
-		// A lazy fetch is a transfer to the promisor remote, so it is gated
-		// exactly like an explicit one: a rewrite in the repository's own
-		// configuration must not be able to decide where the objects that end up
-		// in the transformed history are downloaded from.
-		if err := r.assertNoRemoteRewrites(ctx); err != nil {
+		if err := r.assertLazyFetchAllowed(ctx); err != nil {
 			return nil, fmt.Errorf("git object info: %w", err)
 		}
+		// The empty credential helper resets the helper list, so a repository
+		// local helper can neither be consulted nor prompt during the transfer.
+		args = append(slices.Clone(anonymousConfig), args...)
 	} else {
 		env = []string{noLazyFetch}
 	}
-	out, err := r.runInput(ctx, []byte(input.String()), env, "cat-file", "--batch-check", "--buffer")
+	out, err := r.runInput(ctx, []byte(input.String()), env, args...)
 	if err != nil {
 		return nil, fmt.Errorf("git object info: %w", err)
 	}

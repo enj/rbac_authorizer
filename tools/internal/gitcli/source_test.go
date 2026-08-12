@@ -406,14 +406,21 @@ func TestAnonymousDropsCallerEnvironment(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	// The entry applied while it was present, and the redactor still scrubs its
-	// value out of captured output even though this runner can no longer see it.
+	// The entry applied while it was present. The identity is read back exactly
+	// as it was recorded, because a commit identity is replayed content rather
+	// than diagnostics and is not passed through the redactor.
 	before, err := anonymous.CommitInfo(ctx, withEnv)
 	if err != nil {
 		t.Fatalf("commit info: %v", err)
 	}
-	if before.AuthorName != gitcli.Placeholder {
-		t.Fatalf("author %q, want the redacted placeholder", before.AuthorName)
+	if before.AuthorName != injected {
+		t.Fatalf("author %q, want %q", before.AuthorName, injected)
+	}
+
+	// The redactor still carries the value even though this runner can no longer
+	// see the entry, which is what keeps it out of diagnostics after stripping.
+	if anonymous.Redactor().String(injected) != gitcli.Placeholder {
+		t.Fatal("Anonymous dropped the redactor along with the environment")
 	}
 
 	// After stripping, the identity comes from repository configuration again.

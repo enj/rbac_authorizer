@@ -52,9 +52,13 @@ type Policy struct {
 	SigningKeyPath      string
 	SignoffTrailerKey   string
 	SignoffTrailerValue string
-	MinimumGit          gitcli.Version
-	MinimumGo           gitcli.Version
-	Toolchain           string
+	// MinimumGit is the oldest usable Git release. It is gitcli.MinimumVersion
+	// rather than a number of its own, because a doctor that reported a floor
+	// the engine does not actually enforce would pass a machine every later
+	// command then refuses.
+	MinimumGit gitcli.Version
+	MinimumGo  gitcli.Version
+	Toolchain  string
 }
 
 // SoapboxPolicy is the policy for the enj/soapbox repository itself. Every
@@ -69,7 +73,7 @@ func SoapboxPolicy() Policy {
 		SigningKeyPath:      "/Users/mo/.config/wunderkind/ssh/id_ed25519.pub",
 		SignoffTrailerKey:   "Signed-off-by",
 		SignoffTrailerValue: "Monis Khan <mok@microsoft.com>",
-		MinimumGit:          gitcli.Version{Major: 2, Minor: 34},
+		MinimumGit:          gitcli.MinimumVersion(),
 		MinimumGo:           gitcli.Version{Major: 1, Minor: 26},
 		Toolchain:           buildinfo.Toolchain,
 	}
@@ -196,8 +200,11 @@ func checkGit(ctx context.Context, b *builder, opts Options, dir string, policy 
 		b.fail("git.version", true, err.Error())
 		return git
 	}
+	// The floor is named with the capability that sets it, because an operator
+	// who has to raise a Git version deserves to know what is missing rather
+	// than only that a number is too small.
 	b.result("git.version", true, version.AtLeast(policy.MinimumGit),
-		fmt.Sprintf("%s (minimum %s for SSH signing)", version, policy.MinimumGit))
+		fmt.Sprintf("%s (minimum %s, which is where GIT_NO_LAZY_FETCH is honoured)", version, policy.MinimumGit))
 	return git
 }
 

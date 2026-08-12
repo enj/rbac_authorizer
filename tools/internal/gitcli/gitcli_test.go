@@ -452,3 +452,61 @@ func newRunner(t *testing.T, dir string) *gitcli.Runner {
 	}
 	return runner
 }
+
+// TestMalformedEnvironmentEntryIsNotEchoed proves a rejected entry cannot leak
+// the value it carries.
+//
+// An entry with no separator is entirely value, Env is where credentials
+// arrive, and this validation runs in New, before the redactor that would have
+// masked it exists. Quoting the entry there would be the one path by which a
+// token reaches a log through this package.
+//
+// Each case also pins how the failing entry is identified, because a refusal
+// the operator cannot act on is its own defect. Until a name is known that can
+// only be the position; once one is known it is safe to print, since the caller
+// chose it and it is not the secret.
+func TestMalformedEnvironmentEntryIsNotEchoed(t *testing.T) {
+	const secret = "ghs_averyprivatetoken"
+
+	tests := []struct {
+		name string
+		opts gitcli.Options
+		// want is the fragment that identifies the offending entry.
+		want string
+	}{
+		{
+			name: "environment entry",
+			opts: gitcli.Options{Env: []string{"GIT_CONFIG_COUNT=0", secret}},
+			want: "environment entry 1 must be KEY=VALUE",
+		},
+		{
+			name: "isolation entry",
+			opts: gitcli.Options{Isolation: []string{"HOME=/tmp", secret}},
+			want: "isolation entry 1 must be KEY=VALUE",
+		},
+		{
+			name: "environment entry with no name",
+			opts: gitcli.Options{Env: []string{"GIT_CONFIG_COUNT=0", "=" + secret}},
+			want: "environment entry 1 must name a variable",
+		},
+		{
+			name: "environment entry with a null byte",
+			opts: gitcli.Options{Env: []string{"SOAPBOX_TOKEN=" + secret + "\x00"}},
+			want: `"SOAPBOX_TOKEN" must not contain a null byte`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := gitcli.New(t.Context(), test.opts)
+			if err == nil {
+				t.Fatal("a malformed entry was accepted")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("the rejection echoed the value: %v", err)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error %q does not identify the entry as %q", err, test.want)
+			}
+		})
+	}
+}
