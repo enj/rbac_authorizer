@@ -184,3 +184,27 @@ func ValidateRepositorySlug(value string) error {
 	}
 	return nil
 }
+
+// validateProse checks one human written value that is rendered verbatim into a
+// committed file.
+//
+// The rule is that the profile spells the value the way the generated file will
+// read it. Both renderers split prose on whitespace and rejoin it a word at a
+// time to wrap it, so a value carrying a newline, a tab, or a doubled space
+// produces output that does not match what the profile says, and the difference
+// would only ever be noticed in a published NOTICE. Requiring the canonical
+// spacing up front makes the profile and the artifact the same text.
+func validateProse(what, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s must not be empty", what)
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s %q must not contain control characters", what, value)
+		}
+	}
+	if canonical := strings.Join(strings.Fields(value), " "); canonical != value {
+		return fmt.Errorf("%s %q must be single spaced and free of leading or trailing space, want %q", what, value, canonical)
+	}
+	return nil
+}

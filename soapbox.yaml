@@ -7,6 +7,11 @@ version: 1
 source:
   repository: https://github.com/kubernetes/kubernetes.git
   importPrefix: k8s.io/kubernetes
+  # The upstream project's display name and grant. Both are rendered verbatim
+  # into the generated LICENSE, NOTICE, README, and root doc comment, so they
+  # state where the code came from and under which terms it is redistributed.
+  project: Kubernetes
+  license: Apache-2.0
   refs:
     # The first public release is derived from Kubernetes v1.36.1. Later semantic
     # tags, including prereleases, are tracked automatically.
@@ -31,6 +36,9 @@ destination:
   # Relocated Kubernetes packages keep their full upstream relative path below
   # this prefix, because nested internal elements enforce Go visibility.
   internalPrefix: internal/kk
+  # Completes "Package rbacauthorizer provides ..." in the generated root doc
+  # comment, and stands alone as the opening paragraph of the README and NOTICE.
+  summary: the Kubernetes RBAC authorizer as an independently consumable Go module.
 
 packages:
   # Package granularity, not recursive directory copying. The sibling package
@@ -106,6 +114,13 @@ dependencies:
       maxGeneratedFiles: 0
       maxDistinctLicenses: 0
       maxModuleZipBytes: 0
+      # Cadence ceiling and the minimum benefit a copy would have to deliver.
+      # Every value is zero because this profile copies nothing, and a zero
+      # ceiling admits nothing rather than admitting everything.
+      maxReleasesPerMinor: 0
+      minModulesRemoved: 0
+      minPackagesRemoved: 0
+      minLinesRemoved: 0
   overrides: []
 
 # Ordered unified diffs applied before relocation and import rewriting.

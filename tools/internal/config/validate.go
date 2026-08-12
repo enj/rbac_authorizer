@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/enj/soapbox/tools/internal/gitcli"
 )
@@ -27,9 +28,36 @@ const (
 // second mutable global.
 var facadeKinds = []string{"func", "type", "interface", "const"}
 
+// licenseIdentifiers are the SPDX identifiers a profile may name.
+//
+// The list is a copy of the set the provenance verifier can check the text of,
+// and it is a copy on purpose: the verifier reaches this package through the
+// relocation and rewriting layers, so importing it here would close a cycle.
+// TestLicenseIdentifiersMatchVerifier keeps the two in step, which is the same
+// arrangement the gate names use.
+//
+// The set is deliberately small. Naming a licence in a generated file makes a
+// legal claim on the operator's behalf, so a profile may only name one whose
+// text the engine actually reads and checks before publishing anything.
+var licenseIdentifiers = []string{"Apache-2.0", "BSD-3-Clause", "ISC", "MIT"}
+
+// LicenseIdentifiers returns the SPDX identifiers a profile may name.
+//
+// It is exported so the package that verifies licence text can be tested against
+// the profile schema's actual vocabulary rather than against a literal copied
+// into a test, which would keep passing while the two drifted apart.
+func LicenseIdentifiers() []string { return slices.Clone(licenseIdentifiers) }
+
 // costGates may be relaxed by an override. correctnessGates never may.
+//
+// The names are the ones the gate evaluator reports, so an operator reading a
+// refusal and then editing dependencies.overrides does not have to translate.
+// minimumLeverage is one name for the three minimum removal ceilings, because a
+// copy either delivers the benefit the profile asked for or it does not, and
+// relaxing one of the three alone would approve a copy on a benefit nobody
+// stated.
 var (
-	costGates       = []string{"maxCopiedLines", "maxCopiedPackages", "maxDistinctLicenses", "maxGeneratedFiles", "maxModuleZipBytes"}
+	costGates       = []string{"maxCopiedLines", "maxCopiedPackages", "maxDistinctLicenses", "maxGeneratedFiles", "maxModuleZipBytes", "maxReleasesPerMinor", "minimumLeverage"}
 	correctnessGate = []string{"diamond", "globalState", "interoperability"}
 )
 
@@ -112,6 +140,10 @@ func (c *Config) validate() error {
 func (c *Config) validateSource(p *problems) {
 	p.check("source.repository", validateURL(c.Source.Repository, urlRule{allowedHosts: []string{gitHost}, suffix: ".git"}))
 	p.check("source.importPrefix", ValidateModulePath(c.Source.ImportPrefix))
+	p.check("source.project", validateProse("project name", c.Source.Project))
+	if !slices.Contains(licenseIdentifiers, c.Source.License) {
+		p.addf("source.license: unsupported value %q, want one of %s", c.Source.License, strings.Join(licenseIdentifiers, ", "))
+	}
 
 	if _, err := ParseSemver(c.Source.Refs.MinimumRelease); err != nil {
 		p.check("source.refs.minimumRelease", err)
@@ -162,6 +194,31 @@ func (c *Config) validateDestination(p *problems) {
 	p.check("destination.internalPrefix", ValidatePackagePath(d.InternalPrefix))
 	if d.InternalPrefix != "" && !slices.Contains(strings.Split(d.InternalPrefix, "/"), "internal") {
 		p.addf("destination.internalPrefix: %q must contain an internal element so relocated packages stay unimportable", d.InternalPrefix)
+	}
+	c.validateSummary(p)
+}
+
+// validateSummary checks the sentence the generated root doc comment is built
+// from.
+//
+// The summary is rendered as "Package <rootPackage> provides <summary>" with
+// nothing added, and as a standalone paragraph in the README and the NOTICE. The
+// shape rules follow from that single rendering: a summary that began with a
+// capital would read as a second sentence spliced into the first, and one
+// without a final stop would leave every one of those three files ending a
+// paragraph mid-sentence.
+func (c *Config) validateSummary(p *problems) {
+	summary := c.Destination.Summary
+	if err := validateProse("summary", summary); err != nil {
+		p.check("destination.summary", err)
+		return
+	}
+	if first := []rune(summary)[0]; !unicode.IsLower(first) {
+		p.addf("destination.summary: %q must start with a lower case letter because it completes \"Package %s provides ...\"",
+			summary, c.Destination.RootPackage)
+	}
+	if !strings.HasSuffix(summary, ".") {
+		p.addf("destination.summary: %q must end with a full stop because it is rendered as a complete sentence", summary)
 	}
 }
 
@@ -301,6 +358,18 @@ func (c *Config) validateDependencies(p *problems) {
 			p.addf("dependencies.gates.cost.maxCopiedPackages: %d cannot admit %d copy packages",
 				d.Gates.Cost.MaxCopiedPackages, len(d.CopyPackages))
 		}
+		// A zero ceiling admits nothing, so a profile that proposes a copy and
+		// leaves the cadence ceiling at zero has described a copy that can never
+		// be approved.
+		if d.Gates.Cost.MaxReleasesPerMinor == 0 {
+			p.addf("dependencies.gates.cost.maxReleasesPerMinor: policy %q requires a non zero cap", d.Policy)
+		}
+		// The minima are the gate that asks what the copy is for. Leaving all
+		// three at zero demands no benefit at all, which is how a copy that
+		// removes nothing from the consumer build gets approved for being cheap.
+		if d.Gates.Cost.MinModulesRemoved == 0 && d.Gates.Cost.MinPackagesRemoved == 0 && d.Gates.Cost.MinLinesRemoved == 0 {
+			p.addf("dependencies.gates.cost: policy %q requires a non zero minModulesRemoved, minPackagesRemoved, or minLinesRemoved so the copy states the benefit it delivers", d.Policy)
+		}
 	default:
 		p.addf("dependencies.policy: unsupported value %q, want one of %s, %s", d.Policy, DependencyPolicyExternal, DependencyPolicyCopyApproved)
 	}
@@ -332,6 +401,10 @@ func (c *Config) validateDependencies(p *problems) {
 		"maxGeneratedFiles":   int64(d.Gates.Cost.MaxGeneratedFiles),
 		"maxDistinctLicenses": int64(d.Gates.Cost.MaxDistinctLicenses),
 		"maxModuleZipBytes":   d.Gates.Cost.MaxModuleZipBytes,
+		"maxReleasesPerMinor": int64(d.Gates.Cost.MaxReleasesPerMinor),
+		"minModulesRemoved":   int64(d.Gates.Cost.MinModulesRemoved),
+		"minPackagesRemoved":  int64(d.Gates.Cost.MinPackagesRemoved),
+		"minLinesRemoved":     int64(d.Gates.Cost.MinLinesRemoved),
 	}
 	for _, name := range slices.Sorted(maps.Keys(costs)) {
 		if costs[name] < 0 {
@@ -507,16 +580,23 @@ func (c *Config) validateFacade(p *problems) {
 		case !concrete[assertion.Type]:
 			p.addf("facade.interfaceAssertions.type: %q is not an exported facade type", assertion.Type)
 		}
-		if strings.Contains(assertion.Interface, "/") {
-			if _, _, err := ParseSymbolRef(assertion.Interface); err != nil {
-				p.check("facade.interfaceAssertions.interface", err)
-			}
-			continue
-		}
-		if err := ValidateExportedIdent(assertion.Interface); err != nil {
+		// The asserted interface is always a qualified symbol in a module this
+		// one does not own. An assertion exists to prove the facade type
+		// satisfies the real upstream interface that consumers pass it to;
+		// asserting against a name this facade republishes would compare the
+		// type to a copy and prove nothing about the interface anyone uses. The
+		// generator refuses an unqualified name outright, so a profile carrying
+		// one is refused here rather than validating and then failing to
+		// generate.
+		pkgPath, _, err := ParseSymbolRef(assertion.Interface)
+		switch {
+		case err != nil:
 			p.check("facade.interfaceAssertions.interface", err)
-		} else if !named[assertion.Interface] {
-			p.addf("facade.interfaceAssertions.interface: %q is neither a facade type nor a qualified symbol", assertion.Interface)
+		case ValidateModulePath(pkgPath) != nil:
+			p.addf("facade.interfaceAssertions.interface: %q must name a package qualified interface, such as k8s.io/apiserver/pkg/authorization/authorizer.Authorizer", assertion.Interface)
+		case underPrefix(pkgPath, c.Destination.Module):
+			p.addf("facade.interfaceAssertions.interface: %q is inside destination.module %q, and an assertion against a copied interface proves nothing about the real one",
+				assertion.Interface, c.Destination.Module)
 		}
 	}
 	for _, dup := range duplicates(assertions) {

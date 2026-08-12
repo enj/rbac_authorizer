@@ -181,6 +181,46 @@ func TestDecodeRejectsInvalidProfiles(t *testing.T) {
 			want:      "must be lower case letters and digits",
 		},
 		{
+			name:      "empty upstream project name",
+			mutations: []mutation{{old: "  project: Kubernetes\n", new: "  project: \"\"\n"}},
+			want:      "source.project: project name must not be empty",
+		},
+		{
+			name:      "upstream project name is not single spaced",
+			mutations: []mutation{{old: "  project: Kubernetes\n", new: "  project: \"The  Kubernetes Project\"\n"}},
+			want:      "must be single spaced",
+		},
+		{
+			name:      "unverifiable licence identifier",
+			mutations: []mutation{{old: "  license: Apache-2.0\n", new: "  license: GPL-3.0-only\n"}},
+			want:      "source.license: unsupported value \"GPL-3.0-only\"",
+		},
+		{
+			name:      "missing licence identifier",
+			mutations: []mutation{{old: "  license: Apache-2.0\n", new: "  license: \"\"\n"}},
+			want:      "source.license: unsupported value \"\"",
+		},
+		{
+			name:      "empty destination summary",
+			mutations: []mutation{{old: "  summary: the Kubernetes RBAC authorizer as an independently consumable Go module.\n", new: "  summary: \"\"\n"}},
+			want:      "destination.summary: summary must not be empty",
+		},
+		{
+			name:      "destination summary starts a new sentence",
+			mutations: []mutation{{old: "  summary: the Kubernetes", new: "  summary: The Kubernetes"}},
+			want:      "must start with a lower case letter",
+		},
+		{
+			name:      "destination summary is not a sentence",
+			mutations: []mutation{{old: " consumable Go module.\n", new: " consumable Go module\n"}},
+			want:      "must end with a full stop",
+		},
+		{
+			name:      "destination summary has trailing space",
+			mutations: []mutation{{old: "  summary: the Kubernetes", new: "  summary: \"  the Kubernetes"}, {old: " consumable Go module.\n", new: " consumable Go module.\"\n"}},
+			want:      "must be single spaced and free of leading or trailing space",
+		},
+		{
 			name:      "closure limit is zero",
 			mutations: []mutation{{old: "maxPackages: 8", new: "maxPackages: 0"}},
 			want:      "closure.limits.maxPackages: must be greater than zero",
@@ -235,6 +275,45 @@ func TestDecodeRejectsInvalidProfiles(t *testing.T) {
 			name:      "negative cost gate",
 			mutations: []mutation{{old: "maxCopiedLines: 0", new: "maxCopiedLines: -1"}},
 			want:      "must not be negative",
+		},
+		{
+			name:      "negative cadence gate",
+			mutations: []mutation{{old: "maxReleasesPerMinor: 0", new: "maxReleasesPerMinor: -1"}},
+			want:      "dependencies.gates.cost.maxReleasesPerMinor: must not be negative",
+		},
+		{
+			name:      "negative leverage gate",
+			mutations: []mutation{{old: "minPackagesRemoved: 0", new: "minPackagesRemoved: -3"}},
+			want:      "dependencies.gates.cost.minPackagesRemoved: must not be negative",
+		},
+		{
+			name: "copy approved without a cadence ceiling",
+			mutations: []mutation{
+				{old: "  policy: external\n  copyPackages: []", new: "  policy: copy-approved\n  copyPackages:\n    - staging/src/k8s.io/apiserver/pkg/authorization/authorizer"},
+				{old: "maxCopiedPackages: 0", new: "maxCopiedPackages: 4"},
+				{old: "minLinesRemoved: 0", new: "minLinesRemoved: 500"},
+			},
+			want: "dependencies.gates.cost.maxReleasesPerMinor: policy \"copy-approved\" requires a non zero cap",
+		},
+		{
+			name: "copy approved states no benefit",
+			mutations: []mutation{
+				{old: "  policy: external\n  copyPackages: []", new: "  policy: copy-approved\n  copyPackages:\n    - staging/src/k8s.io/apiserver/pkg/authorization/authorizer"},
+				{old: "maxCopiedPackages: 0", new: "maxCopiedPackages: 4"},
+				{old: "maxReleasesPerMinor: 0", new: "maxReleasesPerMinor: 6"},
+			},
+			want: "so the copy states the benefit it delivers",
+		},
+		{
+			name: "override relaxes an unsupported gate",
+			mutations: []mutation{
+				{old: "  policy: external\n  copyPackages: []", new: "  policy: copy-approved\n  copyPackages:\n    - staging/src/k8s.io/apiserver/pkg/authorization/authorizer"},
+				{old: "maxCopiedPackages: 0", new: "maxCopiedPackages: 4"},
+				{old: "maxReleasesPerMinor: 0", new: "maxReleasesPerMinor: 6"},
+				{old: "minLinesRemoved: 0", new: "minLinesRemoved: 500"},
+				{old: "  overrides: []", new: "  overrides:\n    - package: staging/src/k8s.io/apiserver/pkg/authorization/authorizer\n      gate: minPackagesRemoved\n      justification: because\n      approver: Monis Khan\n      expiresAfter: v1.40"},
+			},
+			want: "unsupported gate \"minPackagesRemoved\"",
 		},
 		{
 			name: "override relaxes a correctness gate",
@@ -319,9 +398,30 @@ func TestDecodeRejectsInvalidProfiles(t *testing.T) {
 			want:      "is not an exported facade type",
 		},
 		{
-			name:      "assertion interface is not qualified",
+			name:      "assertion interface is a bare identifier",
 			mutations: []mutation{{old: "      interface: k8s.io/apiserver/pkg/authorization/authorizer.Authorizer", new: "      interface: Authorizer"}},
-			want:      "neither a facade type nor a qualified symbol",
+			want:      "must be <import path>.<Name>",
+		},
+		{
+			// A facade export is a name this module publishes, so asserting
+			// against it would compare the type to a copy of the interface
+			// rather than to the one consumers pass it to.
+			name: "assertion interface names a facade export",
+			mutations: []mutation{
+				{old: "  interfaceAssertions:\n    - type: RBACAuthorizer\n      pointer: true\n      interface: k8s.io/apiserver/pkg/authorization/authorizer.Authorizer",
+					new: "  interfaceAssertions:\n    - type: RBACAuthorizer\n      pointer: true\n      interface: RBACAuthorizer"},
+			},
+			want: "must be <import path>.<Name>",
+		},
+		{
+			name:      "assertion interface has no domain qualified package",
+			mutations: []mutation{{old: "      interface: k8s.io/apiserver/pkg/authorization/authorizer.Authorizer", new: "      interface: authorizer.Authorizer"}},
+			want:      "must name a package qualified interface",
+		},
+		{
+			name:      "assertion interface is inside the generated module",
+			mutations: []mutation{{old: "      interface: k8s.io/apiserver/pkg/authorization/authorizer.Authorizer", new: "      interface: monis.app/kk/rbac_authorizer/internal/kk/authorizer.Authorizer"}},
+			want:      "proves nothing about the real one",
 		},
 		{
 			name:      "facade package does not match the root package",

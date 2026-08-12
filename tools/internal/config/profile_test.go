@@ -68,13 +68,6 @@ func TestProfileBytesExcludesOperationalFields(t *testing.T) {
 			name:      "prerelease selection",
 			mutations: []mutation{{old: "includePrereleases: true", new: "includePrereleases: false"}},
 		},
-		{
-			name: "dependency cost gates",
-			mutations: []mutation{
-				{old: "maxCopiedLines: 0", new: "maxCopiedLines: 500"},
-				{old: "maxModuleZipBytes: 0", new: "maxModuleZipBytes: 1048576"},
-			},
-		},
 	}
 
 	baseline := profileBytes(t, baseProfile)
@@ -112,6 +105,8 @@ func TestProfileBytesIncludesOutputAffectingFields(t *testing.T) {
 		{name: "required entries", mutations: []mutation{{old: "  required:\n    - pkg/apis/rbac/v1/doc.go\n", new: "  required:\n    - pkg/apis/rbac/v1/doc.go\n    - pkg/apis/rbac/v1/evaluation_helpers.go\n"}}},
 		{name: "denied imports", mutations: []mutation{{old: "    - k8s.io/kubernetes/pkg/apis/rbac\ncl", new: "    - k8s.io/kubernetes/pkg/apis/rbac\n    - k8s.io/kubernetes/pkg/features\ncl"}}},
 		{name: "test inclusion", mutations: []mutation{{old: "includeTests: false", new: "includeTests: true"}}},
+		{name: "dependency cost gates", mutations: []mutation{{old: "maxCopiedLines: 0", new: "maxCopiedLines: 500"}, {old: "maxModuleZipBytes: 0", new: "maxModuleZipBytes: 1048576"}}},
+		{name: "dependency cadence and leverage gates", mutations: []mutation{{old: "maxReleasesPerMinor: 0", new: "maxReleasesPerMinor: 6"}, {old: "minModulesRemoved: 0", new: "minModulesRemoved: 1"}, {old: "minPackagesRemoved: 0", new: "minPackagesRemoved: 4"}, {old: "minLinesRemoved: 0", new: "minLinesRemoved: 900"}}},
 		{name: "type policy", mutations: []mutation{{old: "  policy: prefer-external\n  pairs:\n    - internal: k8s.io/kubernetes/pkg/apis/rbac\n      external: k8s.io/api/rbac/v1", new: "  policy: keep-internal\n  pairs: []"}}},
 		{name: "facade exports", mutations: []mutation{{old: "  aliases:\n", new: "    - name: RulesAllow\n      kind: func\n      source: k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac.RulesAllow\n  aliases:\n"}}},
 		{name: "commit committer", mutations: []mutation{{old: "    name: soapbox[bot]", new: "    name: soapbox-publisher[bot]"}}},
@@ -119,6 +114,12 @@ func TestProfileBytesIncludesOutputAffectingFields(t *testing.T) {
 		{name: "release mapping", mutations: []mutation{{old: "minimumRelease: v1.36.1", new: "minimumRelease: v1.36.2"}, {old: "firstTag: v0.36.1", new: "firstTag: v0.36.2"}}},
 		{name: "source import prefix", mutations: []mutation{{old: "importPrefix: k8s.io/kubernetes", new: "importPrefix: k8s.io/kubernetes2"}, {old: "    - k8s.io/kubernetes/pkg/apis/rbac\ncl", new: "    - k8s.io/kubernetes2/pkg/apis/rbac\ncl"}, {old: "internal: k8s.io/kubernetes/pkg/apis/rbac", new: "internal: k8s.io/kubernetes2/pkg/apis/rbac"}, {old: "source: k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac.New", new: "source: k8s.io/kubernetes2/plugin/pkg/auth/authorizer/rbac.New"}, {old: "source: k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac.RBACAuthorizer", new: "source: k8s.io/kubernetes2/plugin/pkg/auth/authorizer/rbac.RBACAuthorizer"}, {old: "source: k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac.RoleGetter", new: "source: k8s.io/kubernetes2/plugin/pkg/auth/authorizer/rbac.RoleGetter"}}},
 		{name: "anchor commit", mutations: []mutation{{old: `anchorCommit: ""`, new: `anchorCommit: "1f0c2b3a4d5e6f708192a3b4c5d6e7f809a1b2c3"`}}},
+		// The three prose values are rendered verbatim into the committed
+		// NOTICE, README, and root doc comment, so each one changes generated
+		// bytes exactly as renaming a package would.
+		{name: "upstream project name", mutations: []mutation{{old: "  project: Kubernetes\n", new: "  project: Kubernetes Core\n"}}},
+		{name: "upstream licence identifier", mutations: []mutation{{old: "  license: Apache-2.0\n", new: "  license: MIT\n"}}},
+		{name: "destination summary", mutations: []mutation{{old: " consumable Go module.\n", new: " consumable Go library.\n"}}},
 	}
 
 	baseline := profileBytes(t, baseProfile)
@@ -129,6 +130,37 @@ func TestProfileBytesIncludesOutputAffectingFields(t *testing.T) {
 				t.Fatal("an output affecting change left the replay profile identity unchanged")
 			}
 		})
+	}
+}
+
+// TestProfileBytesIncludesDependencyOverrides pins the policy control that can
+// change whether a proposed staging copy enters the generated tree. Overrides
+// are validated against copy-approved profiles, but ProfileBytes also accepts a
+// constructed Config, so this isolates the override from every other policy
+// field and proves it participates in the epoch identity itself.
+func TestProfileBytesIncludesDependencyOverrides(t *testing.T) {
+	cfg, err := config.Decode([]byte(baseProfile))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	baseline, err := cfg.ProfileBytes()
+	if err != nil {
+		t.Fatalf("profile bytes: %v", err)
+	}
+
+	cfg.Dependencies.Overrides = []config.DependencyOverride{{
+		Package:       "staging/src/k8s.io/api/example",
+		Gate:          "maxCopiedLines",
+		Justification: "temporary measured exception",
+		Approver:      "release engineering",
+		ExpiresAfter:  "v1.36",
+	}}
+	changed, err := cfg.ProfileBytes()
+	if err != nil {
+		t.Fatalf("profile bytes with override: %v", err)
+	}
+	if string(changed) == string(baseline) {
+		t.Fatal("a dependency override left the replay profile identity unchanged")
 	}
 }
 
