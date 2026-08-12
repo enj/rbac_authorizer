@@ -38,6 +38,7 @@ import (
 	"github.com/enj/soapbox/tools/internal/config"
 	"github.com/enj/soapbox/tools/internal/gitcli"
 	"github.com/enj/soapbox/tools/internal/relocate"
+	"github.com/enj/soapbox/tools/internal/rewrite"
 )
 
 // defaultWidenCeiling bounds the sparse widening loop for a profile that sets no
@@ -147,6 +148,19 @@ type Result struct {
 	// the per-package provenance records. It is what -materialize writes, and it
 	// is empty for a plan that refused before relocating.
 	Files relocate.FileSet
+	// Provenance is the structured form of the per-package records, one entry
+	// per relocated package, ordered by destination directory.
+	//
+	// It carries exactly what the committed SOAPBOX_PROVENANCE.txt beside each
+	// package states, in the shape the root NOTICE generator consumes. Rendering
+	// those records and then parsing the text back is the one way this evidence
+	// could disagree with itself, so the structure the text was rendered from is
+	// what leaves the plan.
+	//
+	// A plan that refused after relocating still carries the records it built,
+	// because a refusal is when the evidence is most worth reading. It is empty
+	// for a plan that refused before it got that far.
+	Provenance []*rewrite.PackageProvenance
 	// Paths are the absolute directories the run used. They are deliberately
 	// outside Report, which carries no absolute path.
 	Paths Paths

@@ -119,6 +119,11 @@ type run struct {
 	// provenance indexes the destination paths of the records this engine
 	// generated.
 	provenance map[string]bool
+	// records are the structured per-package provenance records, ordered by
+	// destination directory. They are the values the committed records were
+	// rendered from, kept so a caller can be handed the same evidence without
+	// anyone parsing the rendered text back into a structure.
+	records []*rewrite.PackageProvenance
 	// tree is the final relocated file set, including provenance records.
 	tree relocate.FileSet
 	// notices are advisory findings, unsorted until the report is assembled.

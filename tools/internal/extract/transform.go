@@ -386,6 +386,7 @@ func (r *run) planProvenance(ctx context.Context, pass1 relocate.FileSet) ([]rel
 	}
 
 	r.provenance = make(map[string]bool, len(records))
+	r.records = make([]*rewrite.PackageProvenance, 0, len(records))
 	files := make([]relocate.PlanFile, 0, len(records))
 	for i := range records {
 		record := &records[i]
@@ -398,17 +399,18 @@ func (r *run) planProvenance(ctx context.Context, pass1 relocate.FileSet) ([]rel
 		}
 		r.provenance[r.destinationOf(record.source)] = true
 
-		contents, err := r.render(*record, pass1)
+		rendered, err := r.render(*record, pass1)
 		if err != nil {
 			return nil, err
 		}
+		r.records = append(r.records, rendered)
 		files = append(files, relocate.PlanFile{
 			Path:    record.source,
 			Package: path.Dir(record.source),
 			Mode:    relocate.ModeRegular,
 			// The record is not upstream source and carries no generated file
 			// marker: it is written by this engine and describes the package.
-			Contents: contents,
+			Contents: []byte(rendered.Render()),
 		})
 	}
 	return files, nil
@@ -538,8 +540,12 @@ func escapePackageDir(pkg string) string {
 	return strings.ReplaceAll(pkg, "/", "_")
 }
 
-// render renders one package's provenance record.
-func (r *run) render(record provenanceRecord, pass1 relocate.FileSet) ([]byte, error) {
+// render builds one package's provenance record.
+//
+// The record is returned rather than its rendering, because the same values
+// become both the committed text and the evidence the plan hands back. Rendering
+// it twice from one structure is what keeps the two from ever disagreeing.
+func (r *run) render(record provenanceRecord, pass1 relocate.FileSet) (*rewrite.PackageProvenance, error) {
 	rendered := rewrite.NewPackageProvenance(r.destinationOf(record.pkg), record.pkg, r.baseRewriteOptions())
 	for _, destination := range record.files {
 		file, ok := pass1.Lookup(destination)
@@ -559,7 +565,7 @@ func (r *run) render(record provenanceRecord, pass1 relocate.FileSet) ([]byte, e
 		}
 	}
 	rendered.AddPatches(r.applied...)
-	return []byte(rendered.Render()), nil
+	return rendered, nil
 }
 
 // buildFinalTree relocates the rewritten bytes and the generated records
@@ -794,8 +800,46 @@ func (r *run) finish(ctx context.Context) (*Result, error) {
 }
 
 // result renders the run's current state as a completed plan.
+//
+// The evidence is copied on the way out. A caller holds the only reference to a
+// result and has every reason to sort, filter, and annotate what it finds there,
+// while the run keeps reading its own copy to check the invariants that follow.
+// Handing out the run's slices would make one of those two harmless activities
+// silently corrupt the other.
 func (r *run) result() *Result {
-	return &Result{Report: r.report, Files: r.tree, Paths: r.paths}
+	return &Result{
+		Report:     r.report,
+		Files:      r.tree,
+		Provenance: clonePackageProvenance(r.records),
+		Paths:      r.paths,
+	}
+}
+
+// clonePackageProvenance deep copies the per-package records.
+//
+// Every level that a caller could reach and write through is copied: the slice
+// of pointers, each record, its file list, each file's change list, and the
+// pruned and patch lists. What remains shared is immutable, which is why the
+// copy stops there rather than continuing into strings.
+func clonePackageProvenance(records []*rewrite.PackageProvenance) []*rewrite.PackageProvenance {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]*rewrite.PackageProvenance, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		copied := *record
+		copied.Files = slices.Clone(record.Files)
+		for i, file := range copied.Files {
+			copied.Files[i].Changes = slices.Clone(file.Changes)
+		}
+		copied.Pruned = slices.Clone(record.Pruned)
+		copied.Patches = slices.Clone(record.Patches)
+		out = append(out, &copied)
+	}
+	return out
 }
 
 // failedResult records why a plan refused and renders the partial report.
