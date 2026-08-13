@@ -17,12 +17,16 @@ import (
 // profile produce the same bytes.
 func (r *run) compose(pin enginePin) error {
 	cfg := r.opts.Config
+	engineRequires, err := engineRequirements(r.opts.EngineMod)
+	if err != nil {
+		return policyErrorf("setup: tools go.mod: %w", err)
+	}
 
 	rootMod, err := composeRootGoMod(cfg.Destination.Module)
 	if err != nil {
 		return policyErrorf("setup: root go.mod: %w", err)
 	}
-	toolsMod, err := composeToolsGoMod(cfg.Destination.Module, pin)
+	toolsMod, err := composeToolsGoMod(cfg.Destination.Module, pin, engineRequires)
 	if err != nil {
 		return policyErrorf("setup: tools go.mod: %w", err)
 	}
@@ -44,7 +48,7 @@ func (r *run) compose(pin enginePin) error {
 		{path: syncWorkflowPath, contents: composeSyncWorkflow(inputs)},
 	}
 
-	sum, err := composeEngineSum(r.opts.EngineSum, pin)
+	sum, err := composeEngineSum(r.opts.EngineSum, pin, engineRequires)
 	if err != nil {
 		return policyErrorf("setup: %w", err)
 	}

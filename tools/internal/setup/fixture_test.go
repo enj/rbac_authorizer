@@ -2,6 +2,7 @@ package setup_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,14 +33,25 @@ var templateFiles = map[string]string{
 	"tools/cmd/soapbox/main.go": "package main\n\nfunc main() {}\n",
 
 	// Template owned, removed by setup.
-	"CLAUDE.md":                               "# project instructions\n",
-	".golangci.yml":                           "version: \"2\"\n",
-	".claude/settings.json":                   "{}\n",
-	".serena/project.yml":                     "name: soapbox\n",
-	"docs/setup.md":                           "# setup\n",
-	"plans/goal.md":                           "# goal\n",
-	"tools/soapbox_test.go":                   "package soapbox\n",
-	"tools/go.mod":                            "module github.com/enj/soapbox/tools\n\ngo 1.26.0\n",
+	"CLAUDE.md":             "# project instructions\n",
+	".golangci.yml":         "version: \"2\"\n",
+	".claude/settings.json": "{}\n",
+	".serena/project.yml":   "name: soapbox\n",
+	"docs/setup.md":         "# setup\n",
+	"plans/goal.md":         "# goal\n",
+	"tools/soapbox_test.go": "package soapbox\n",
+	"tools/go.mod": `module github.com/enj/soapbox/tools
+
+go 1.26.0
+
+require (
+	golang.org/x/mod v0.39.0
+	golang.org/x/tools v0.48.0
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require golang.org/x/sync v0.22.0 // indirect
+`,
 	"tools/go.sum":                            "",
 	"tools/internal/config/config.go":         "package config\n",
 	".github/workflows/ci.yml":                "name: engine-ci\n",
@@ -90,10 +102,15 @@ func newOptions(ctx context.Context, tb testing.TB, root string, git *gitcli.Run
 	if err != nil {
 		tb.Fatalf("load profile: %v", err)
 	}
+	engineMod, err := os.ReadFile(filepath.Join(root, "tools", "go.mod"))
+	if err != nil {
+		tb.Fatalf("read engine go.mod: %v", err)
+	}
 	return setup.Options{
 		Root:          root,
 		Config:        cfg,
 		EngineVersion: engineRelease,
+		EngineMod:     engineMod,
 		Git:           git,
 	}
 }
@@ -125,10 +142,21 @@ func actionPaths(result *setup.Result, kind string) []string {
 // what is under test is that setup refuses content that does not cover the pin
 // and writes content that does.
 func engineSumFor(version string) []byte {
-	return []byte(strings.Join([]string{
-		setup.EngineModulePath + " " + version + " h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-		setup.EngineModulePath + " " + version + "/go.mod h1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-	}, "\n") + "\n")
+	modules := []string{
+		setup.EngineModulePath + " " + version,
+		"golang.org/x/mod v0.39.0",
+		"golang.org/x/sync v0.22.0",
+		"golang.org/x/tools v0.48.0",
+		"gopkg.in/yaml.v3 v3.0.1",
+	}
+	var lines []string
+	for _, module := range modules {
+		lines = append(lines,
+			module+" h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			module+"/go.mod h1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+		)
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 // fixtureProfile is a complete, valid extraction profile. Setup reads only the

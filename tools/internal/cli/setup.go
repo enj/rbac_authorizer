@@ -34,7 +34,7 @@ func setupFlagSet() (*flag.FlagSet, *setupFlags) {
 		dir:     fs.String("dir", ".", "template checkout to transform in place"),
 		path:    fs.String("config", config.DefaultFileName, "profile path relative to -dir"),
 		engine:  fs.String("engine-version", "", "immutable engine release the nested tools module pins, spelled v1.2.3 or "+setup.EngineTagPrefix+"v1.2.3"),
-		sum:     fs.String("engine-sum", "", "file holding the verified go.sum content for the nested tools module"),
+		sum:     fs.String("engine-sum", "", "file holding the complete verified go.sum content for the nested tools module"),
 		format:  fs.String("format", runFormats[0], "output format: "+strings.Join(runFormats, ", ")),
 		report:  fs.String("report", "", "write the manifest to this path, relative to -dir when not absolute"),
 		apply:   fs.Bool("apply", false, "write the manifest instead of reporting it, which requires -approve"),
@@ -88,6 +88,10 @@ func runSetup(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return profileError(env, paths.config, err)
 	}
+	engineMod, err := readTemplateEngineMod(ctx, paths.dir)
+	if err != nil {
+		return err
+	}
 	engineSum, err := readEngineSum(paths.sum)
 	if err != nil {
 		return err
@@ -104,6 +108,7 @@ func runSetup(ctx context.Context, env Env, args []string) error {
 		Root:          paths.dir,
 		Config:        cfg,
 		EngineVersion: *flags.engine,
+		EngineMod:     engineMod,
 		EngineSum:     engineSum,
 		Git:           git,
 	}
@@ -178,6 +183,25 @@ func setupPaths(env Env, flags *setupFlags) (resolvedSetupPaths, error) {
 		}
 	}
 	return paths, nil
+}
+
+// readTemplateEngineMod reads the dependency graph of the engine this template
+// carries. Setup pins the matching immutable release and writes these
+// requirements as indirect requirements of the derived shim.
+func readTemplateEngineMod(ctx context.Context, dir string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("read template engine go.mod: %w", err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read template engine go.mod: %w", err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile(filepath.Join("tools", "go.mod"))
+	if err != nil {
+		return nil, fmt.Errorf("read template engine go.mod: %w", err)
+	}
+	return data, nil
 }
 
 // readEngineSum reads the verified checksums for the nested tools module.

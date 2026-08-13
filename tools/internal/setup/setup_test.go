@@ -471,11 +471,28 @@ func TestGeneratedModulesPinTheEngine(t *testing.T) {
 	if got := toolsMod.Module.Mod.Path; got != "monis.app/kk/rbac_authorizer/tools" {
 		t.Errorf("tools module = %q", got)
 	}
-	if len(toolsMod.Require) != 1 {
-		t.Fatalf("tools module requires %d modules, want exactly the engine", len(toolsMod.Require))
+	wantRequirements := map[string]string{
+		setup.EngineModulePath: "v1.4.2",
+		"golang.org/x/mod":     "v0.39.0",
+		"golang.org/x/sync":    "v0.22.0",
+		"golang.org/x/tools":   "v0.48.0",
+		"gopkg.in/yaml.v3":     "v3.0.1",
 	}
-	if got := toolsMod.Require[0].Mod; got.Path != setup.EngineModulePath || got.Version != "v1.4.2" {
-		t.Errorf("engine requirement = %s %s, want %s v1.4.2", got.Path, got.Version, setup.EngineModulePath)
+	if len(toolsMod.Require) != len(wantRequirements) {
+		t.Fatalf("tools module requires %d modules, want the engine plus its %d graph roots", len(toolsMod.Require), len(wantRequirements)-1)
+	}
+	for _, requirement := range toolsMod.Require {
+		want, ok := wantRequirements[requirement.Mod.Path]
+		if !ok || requirement.Mod.Version != want {
+			t.Errorf("unexpected tools requirement %s %s", requirement.Mod.Path, requirement.Mod.Version)
+			continue
+		}
+		if requirement.Mod.Path == setup.EngineModulePath && requirement.Indirect {
+			t.Error("the shim's direct engine requirement is marked indirect")
+		}
+		if requirement.Mod.Path != setup.EngineModulePath && !requirement.Indirect {
+			t.Errorf("engine graph root %s is not marked indirect", requirement.Mod.Path)
+		}
 	}
 
 	// The shim compiles against the engine's public entry point and nothing else,
@@ -491,6 +508,47 @@ func TestGeneratedModulesPinTheEngine(t *testing.T) {
 	sum := readFile(t, filepath.Join(root, "tools", "go.sum"))
 	if !strings.Contains(sum, setup.EngineModulePath+" v1.4.2 h1:") {
 		t.Errorf("tools/go.sum does not cover the pinned release:\n%s", sum)
+	}
+}
+
+func TestPlanRefusesInvalidEngineModule(t *testing.T) {
+	tests := []struct {
+		name      string
+		engineMod string
+		want      string
+	}{
+		{
+			name:      "another module",
+			engineMod: "module example.com/other\n\ngo 1.26.0\n",
+			want:      "want \"github.com/enj/soapbox/tools\"",
+		},
+		{
+			name: "local replacement",
+			engineMod: `module github.com/enj/soapbox/tools
+
+ go 1.26.0
+
+ replace golang.org/x/mod => ../mod
+`,
+			want: "replace or exclude",
+		},
+		{
+			name:      "malformed",
+			engineMod: "this is not a module file\n",
+			want:      "parse pinned engine go.mod",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			opts := mustOptions(ctx, t)
+			opts.EngineMod = []byte(test.engineMod)
+			_, err := setup.Plan(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("plan error = %v, want %q", err, test.want)
+			}
+			assertPolicy(t, err)
+		})
 	}
 }
 
@@ -514,12 +572,18 @@ func TestEngineChecksums(t *testing.T) {
 		{
 			name:    "covering another release",
 			sum:     engineSumFor("v1.4.1"),
-			wantErr: "do not cover the pinned release",
+			wantErr: "cannot load the pinned engine from a clean cache",
 		},
 		{
 			name:    "missing the module hash",
 			sum:     []byte(setup.EngineModulePath + " v1.4.2/go.mod h1:AAAA=\n"),
-			wantErr: "do not cover the pinned release",
+			wantErr: "cannot load the pinned engine from a clean cache",
+		},
+		{
+			name: "missing an engine graph root",
+			sum: []byte(strings.Replace(string(engineSumFor("v1.4.2")),
+				"golang.org/x/mod v0.39.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n", "", 1)),
+			wantErr: "golang.org/x/mod v0.39.0",
 		},
 		{
 			name:    "malformed",

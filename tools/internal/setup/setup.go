@@ -71,9 +71,16 @@ type Options struct {
 	// "tools/v1.2.3", because an operator reads the second one off the release
 	// page and the first one out of a go.mod.
 	EngineVersion string
-	// EngineSum is the verified go.sum content for the nested tools module. It is
-	// optional because the checksum of an engine release cannot be computed from
-	// a checkout; see [engineSum] for what is written when it is absent.
+	// EngineMod is the go.mod of the engine release being pinned. Its requirements
+	// become indirect requirements of the shim, as required by Go's pruned module
+	// graph. The CLI reads it from the template's nested engine module; setup
+	// refuses to guess a dependency graph when it is absent or names another
+	// module.
+	EngineMod []byte
+	// EngineSum is the complete verified go.sum content for the nested tools
+	// module. It covers the pinned engine and every module named by EngineMod. It
+	// is optional because release checksums cannot be computed from a checkout;
+	// see [composeEngineSum] for what is written when it is absent.
 	EngineSum []byte
 	// Git drives the repository. It needs no credential: setup reads the tracked
 	// tree and the work tree status and nothing else.
@@ -91,6 +98,8 @@ func (o Options) check() error {
 		return fmt.Errorf("repository root %q must be a cleaned path", o.Root)
 	case o.Config == nil:
 		return errors.New("a validated profile is required")
+	case len(o.EngineMod) == 0:
+		return errors.New("the pinned engine go.mod is required so the shim module graph is complete")
 	case o.Git == nil:
 		return errors.New("a git runner is required")
 	case o.Config.Determinism.Toolchain != buildinfo.Toolchain:

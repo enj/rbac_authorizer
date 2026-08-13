@@ -91,24 +91,60 @@ func toolsModulePath(rootModule string) string {
 // would put a version in the module graph that no generation chose. The first
 // generation writes them.
 func composeRootGoMod(modulePath string) ([]byte, error) {
-	return renderGoMod(modulePath, nil)
+	return renderGoMod(modulePath, nil, nil)
 }
 
 // composeToolsGoMod renders the nested tools module.
 //
-// The engine is its one requirement, and the shim exists so that a derived
-// repository can run the engine without carrying it. Tool dependencies stay
-// behind this boundary: the root module never requires the engine, so nothing a
-// consumer of the generated library resolves is affected by what the engine
-// depends on.
-func composeToolsGoMod(rootModule string, pin enginePin) ([]byte, error) {
-	return renderGoMod(toolsModulePath(rootModule), []module.Version{{Path: EngineModulePath, Version: pin.version}})
+// The shim imports only the engine, but Go's pruned module graph also requires
+// the main module to state the modules needed to load that dependency. The
+// pinned engine's requirements are therefore copied as indirect requirements.
+// They remain behind the nested-module boundary: the generated library's root
+// module never requires the engine or any of its tooling dependencies.
+func composeToolsGoMod(rootModule string, pin enginePin, indirect []module.Version) ([]byte, error) {
+	return renderGoMod(
+		toolsModulePath(rootModule),
+		[]module.Version{{Path: EngineModulePath, Version: pin.version}},
+		indirect,
+	)
+}
+
+// engineRequirements reads the graph roots the pinned engine publishes.
+func engineRequirements(data []byte) ([]module.Version, error) {
+	file, err := modfile.Parse("engine go.mod", data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("parse pinned engine go.mod: %w", err)
+	}
+	if file.Module == nil || file.Module.Mod.Path != EngineModulePath {
+		got := ""
+		if file.Module != nil {
+			got = file.Module.Mod.Path
+		}
+		return nil, fmt.Errorf("pinned engine go.mod declares module %q, want %q", got, EngineModulePath)
+	}
+	if len(file.Replace) > 0 || len(file.Exclude) > 0 {
+		return nil, errors.New("pinned engine go.mod carries replace or exclude directives the derived shim cannot reproduce")
+	}
+	requirements := make([]module.Version, 0, len(file.Require))
+	for _, requirement := range file.Require {
+		if requirement.Mod.Path == EngineModulePath {
+			return nil, errors.New("pinned engine go.mod requires its own module path")
+		}
+		requirements = append(requirements, requirement.Mod)
+	}
+	slices.SortFunc(requirements, func(a, b module.Version) int {
+		if order := strings.Compare(a.Path, b.Path); order != 0 {
+			return order
+		}
+		return strings.Compare(a.Version, b.Version)
+	})
+	return requirements, nil
 }
 
 // renderGoMod formats one go.mod through the module file parser, so the bytes
 // written are the bytes the go command would settle on rather than this
 // package's idea of the layout.
-func renderGoMod(modulePath string, require []module.Version) ([]byte, error) {
+func renderGoMod(modulePath string, direct, indirect []module.Version) ([]byte, error) {
 	if err := module.CheckPath(modulePath); err != nil {
 		return nil, fmt.Errorf("module path %q: %w", modulePath, err)
 	}
@@ -125,9 +161,12 @@ func renderGoMod(modulePath string, require []module.Version) ([]byte, error) {
 	if err := file.AddToolchainStmt(buildinfo.Toolchain); err != nil {
 		return nil, fmt.Errorf("toolchain directive: %w", err)
 	}
-	required := make([]*modfile.Require, 0, len(require))
-	for _, version := range require {
+	required := make([]*modfile.Require, 0, len(direct)+len(indirect))
+	for _, version := range direct {
 		required = append(required, &modfile.Require{Mod: version})
+	}
+	for _, version := range indirect {
+		required = append(required, &modfile.Require{Mod: version, Indirect: true})
 	}
 	file.SetRequire(required)
 	file.Cleanup()
@@ -175,8 +214,8 @@ func run() int {
 }
 
 // engineSumNotice explains an absent tools/go.sum.
-const engineSumNotice = "tools/go.sum was not written: a module checksum cannot be computed from a checkout, " +
-	"so run \"go mod download " + EngineModulePath + "\" inside tools/ once the pinned release is published, or pass the verified go.sum content to -engine-sum"
+const engineSumNotice = "tools/go.sum was not written: module checksums cannot be computed from a checkout, " +
+	"so run \"go mod download all\" inside tools/ once the pinned release is published, or pass the complete verified go.sum content to -engine-sum"
 
 // composeEngineSum validates and normalises operator supplied checksums.
 //
@@ -186,10 +225,11 @@ const engineSumNotice = "tools/go.sum was not written: a module checksum cannot 
 // the operator verified. Composing plausible looking lines is not among them: a
 // wrong hash fails every build, and a right-looking wrong hash is worse.
 //
-// What is checked is that the content is a well formed go.sum which actually
-// covers the pinned release. A go.sum missing the module it exists to pin would
-// be accepted by the file format and rejected by every build.
-func composeEngineSum(raw []byte, pin enginePin) ([]byte, error) {
+// What is checked is that the content is a well formed go.sum which covers the
+// pinned release and both checksum forms of every module its go.mod requires. A
+// shorter file is syntactically valid but cannot load the shim from a clean
+// cache, which is the only environment a generated repository may assume.
+func composeEngineSum(raw []byte, pin enginePin, requirements []module.Version) ([]byte, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
 		return nil, nil
@@ -212,12 +252,13 @@ func composeEngineSum(raw []byte, pin enginePin) ([]byte, error) {
 	slices.Sort(lines)
 	lines = slices.Compact(lines)
 
-	for _, want := range []string{
-		EngineModulePath + " " + pin.version + " ",
-		EngineModulePath + " " + pin.version + "/go.mod ",
-	} {
-		if !slices.ContainsFunc(lines, func(line string) bool { return strings.HasPrefix(line, want) }) {
-			return nil, fmt.Errorf("engine checksums: no entry for %q, so they do not cover the pinned release", strings.TrimSpace(want))
+	covered := append([]module.Version{{Path: EngineModulePath, Version: pin.version}}, requirements...)
+	for _, requirement := range covered {
+		for _, suffix := range []string{"", "/go.mod"} {
+			want := requirement.Path + " " + requirement.Version + suffix + " "
+			if !slices.ContainsFunc(lines, func(line string) bool { return strings.HasPrefix(line, want) }) {
+				return nil, fmt.Errorf("engine checksums: no entry for %q, so the derived shim cannot load the pinned engine from a clean cache", strings.TrimSpace(want))
+			}
 		}
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil

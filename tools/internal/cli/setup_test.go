@@ -194,6 +194,7 @@ func setupTemplate(ctx context.Context, tb testing.TB) string {
 		"tools/soapbox.go":          "package soapbox\n",
 		"tools/internal/cli/cli.go": "package cli\n",
 		"tools/cmd/soapbox/main.go": "package main\n",
+		"tools/go.mod":              "module github.com/enj/soapbox/tools\n\ngo 1.26.0\n",
 		"CLAUDE.md":                 "# instructions\n",
 		"README.md":                 "# fixture\n",
 	} {
