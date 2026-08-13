@@ -23,6 +23,24 @@ import (
 // package index naming a file the set does not hold is an engine fault, and
 // skipping it would leave the hash covering fewer files than the tree holds, so
 // two different modules would agree.
+func TestProfileHashBindsEngineVersion(t *testing.T) {
+	t.Parallel()
+	profile := []byte("profile bytes\n")
+	first := profileHash(profile, "0.1.0")
+	if first != profileHash(profile, "0.1.0") {
+		t.Fatal("identical profile and engine inputs produced different hashes")
+	}
+	if first == profileHash(profile, "0.1.1") {
+		t.Fatal("changing the engine version left the profile epoch unchanged")
+	}
+	if first == profileHash([]byte("other profile\n"), "0.1.0") {
+		t.Fatal("changing the profile left the profile epoch unchanged")
+	}
+	if !strings.HasPrefix(first, "sha256:") || len(first) != len("sha256:")+64 {
+		t.Fatalf("profile hash = %q, want canonical sha256 form", first)
+	}
+}
+
 func TestSummarizeTreeFailsClosedOnAMissingFile(t *testing.T) {
 	present := relocate.File{
 		Source: "pkg/only/only.go", Path: "internal/kk/pkg/only/only.go",

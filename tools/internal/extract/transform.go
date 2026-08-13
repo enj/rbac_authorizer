@@ -610,9 +610,20 @@ func (r *run) setEngine() error {
 	r.report.Engine = EngineReport{
 		Version:     buildinfo.Version,
 		Toolchain:   r.cfg.Determinism.Toolchain,
-		ProfileHash: "sha256:" + contentDigest(profileBytes),
+		ProfileHash: profileHash(profileBytes, buildinfo.Version),
 	}
 	return nil
+}
+
+// profileHash binds an epoch to both output-affecting configuration and the
+// released engine that interpreted it. Length framing keeps the concatenation
+// unambiguous if either input later contains the separator text.
+func profileHash(profile []byte, engineVersion string) string {
+	var identity bytes.Buffer
+	fmt.Fprintf(&identity, "soapbox-profile-v1\nprofile %d\n", len(profile))
+	identity.Write(profile)
+	fmt.Fprintf(&identity, "\nengine %d\n%s", len(engineVersion), engineVersion)
+	return "sha256:" + contentDigest(identity.Bytes())
 }
 
 // checkToolchain refuses a Go toolchain other than the one the profile pins.
