@@ -14,7 +14,8 @@ below lives in a local bare repository used only for the rehearsal.
 | Upstream tag object | `5b824a493a7ca248b726b6ea09d53842b9b992c2` |
 | Upstream commit | `756939600b9a7180fc2df6550a4585b638875e67` |
 | Destination release | `v0.36.1` |
-| Profile hash | `sha256:1dec6c8cf5ab820b8d84b73ef2e27d386f95631f560e6dcc45a53d15a8395b37` |
+| Engine release | `v0.1.0` (`tools/v0.1.0`) |
+| Profile hash | `sha256:baaa140c5a917ce1aedcc8a029f6514666dd0f9ecc3bce96fae3dde8324e1aa4` |
 | Toolchain | `go1.26.5` |
 
 `soapbox validate` passed, `soapbox doctor` passed all 22 checks in the template
@@ -80,7 +81,7 @@ Strict generation ran twice under different work and output roots.
 | Compiled non-standard packages | 198 |
 | Compiled modules | 42 |
 | Generated manifest | `sha256:11f45f0cd1208cdbbc12e4a4de19057816c846bb7342a99a409d826afc6ffc8b` |
-| JSON report SHA-256 | `fa59a9413ece59e7d48083da707daffe266dffa070788d6e70fb722bd49b5790` |
+| JSON report SHA-256 | `5e9bfd6d97accde84ca0d4c8b2a86349dc36d58e0006657c497b94526c97f624` |
 | Generated-only Git tree | `e102c10183c45a326b97afcf6b5c5eb1103a5a34` |
 
 The reports were byte-identical, every generated file was byte-identical, and
@@ -99,9 +100,9 @@ The generated root module passed:
 
 `soapbox setup` was planned, approved by its exact local manifest hash, and
 applied to a fresh clone. The setup manifest was
-`7263a8375809176e313568d5a91ba5d8266d761822c2f22dd093e79eb6bd090c`.
+`6a0911ccffd57c4d1c9c44d0a8012e7b42ba85e1d5f8346bc6ab3694833aed4a`.
 The resulting control-plane commit was signed locally as
-`ee2a23c8bd718ad40b50b7a44965927157a2979c`.
+`8fdd311b5f8706a25594161a226e75f2f4577c32`.
 
 The nested shim pins `github.com/enj/soapbox/tools v0.1.0`, records the engine's
 indirect module graph, and carries complete verified checksums. From an empty
@@ -119,14 +120,14 @@ paths.
 
 | Object | Value |
 |---|---|
-| Setup/control-plane parent | `ee2a23c8bd718ad40b50b7a44965927157a2979c` |
-| Complete destination tree | `392f13e32b27e2daf07e96c3002827bc36f7454a` |
-| Unsigned replay commit | `3abba0375587b8fc14bf5874ff0d92420621c303` |
-| Annotated `v0.36.1` tag object | `c834642fe81faa1ac8c4cd0d863510ebfb480d59` |
-| First state commit | `acb73365a7a2a6877bed37fdcbdc8715ac008e89` |
-| Reconciled state commit | `f1aa37ad0e66a03cbb5e33484cdfd9b20ed6771b` |
-| Reconciled state digest | `sha256:8dcb11f160b26b7db5a2172c554ce6c60e61fc7389c897e8abeeab6a8512bf06` |
-| First synchronization approval hash | `sha256:3281852458248a3fd709cf9abd7804a5f637bb531d35aaa05c9621a48c42c5b6` |
+| Setup/control-plane parent | `8fdd311b5f8706a25594161a226e75f2f4577c32` |
+| Complete destination tree | `22dab14657b1007ea0d8eaa4f0084eea075f7920` |
+| Unsigned replay commit | `47b8d41927fd38b26b67dc378ef67f6720dfa617` |
+| Annotated `v0.36.1` tag object | `67022081dc86f809f0b188dedbe956bff4cdd64b` |
+| First state commit | `5560b94d42210ca9d2940ee82e2dbc8793d46f09` |
+| Reconciled state commit | `15b55e7bb59c33a00bc1283a28067631f761c6ff` |
+| Reconciled state digest | `sha256:aba7a57173338555e24f1decafc95332ee1a90470ff52a205b1a5829831c1002` |
+| First synchronization approval hash | `sha256:92187119cfab7632472f3f00143be8c1fa4b91956e1b262d87d7850b57c6c8ef` |
 
 The replay commit preserves the upstream author and raw author date, uses
 `soapbox[bot]` as committer with the upstream raw committer date, is unsigned,

@@ -74,8 +74,9 @@ go run ./cmd/soapbox validate -dir ..
 ```
 
 Decodes `soapbox.yaml` strictly and prints a summary. `-format canonical` prints
-the normalized profile; `-format profile` prints exactly the bytes that feed the
-replay profile hash, which is the useful one when asking why an epoch changed.
+the normalized profile; `-format profile` prints the configuration portion of
+the replay profile hash. The released engine version is framed beside those
+bytes, so changing either starts a different epoch.
 A profile the operator can fix — an unknown field, a duplicate key, a failed
 validation rule — exits 3, not 1.
 

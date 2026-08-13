@@ -12,7 +12,8 @@ A profile epoch is one run of replay under one profile hash. It is represented
 by exactly two values: the hash, and the destination commit the epoch grafts
 onto.
 
-The hash is `sha256:` followed by 64 lowercase hex characters, computed over an
+The hash is `sha256:` followed by 64 lowercase hex characters. It is computed
+over a length-framed identity containing the released engine version and an
 explicit allowlist of the output-affecting profile fields, YAML-encoded
 canonically. The allowlist is a positive list rather than a subtraction, so a
 field added to the schema does not silently join the hash. What is in and out is

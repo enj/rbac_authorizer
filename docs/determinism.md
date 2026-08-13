@@ -21,8 +21,10 @@ The pin appears in five places and a test keeps them in agreement: `tools/go.mod
 the doctor policy, and the version the engine reports. The generated `sync.yml`
 installs the version derived from the same pin.
 
-The pin feeds the profile hash. Changing it starts a new epoch rather than
-regenerating older tags under a different formatter.
+The pin feeds the profile hash. The released engine version is framed into that
+hash as well, so two engine implementations cannot share an epoch merely because
+they read the same YAML. Changing either starts a new epoch rather than
+regenerating older tags under a different engine or formatter.
 
 ## No clocks
 

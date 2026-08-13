@@ -6,8 +6,9 @@ for a different engine cannot silently lose meaning. Every value is validated
 before any network operation and before anything is written.
 
 Run `soapbox validate` after every edit. `-format canonical` prints the
-normalized profile; `-format profile` prints exactly the bytes that feed the
-replay profile hash, which is how to see whether an edit starts a new epoch.
+normalized profile; `-format profile` prints the configuration portion of the
+replay profile hash, which is how to see whether a profile edit starts a new
+epoch. The released engine version is framed into the hash separately.
 
 Two rules apply everywhere and are not repeated below. Every configured path is
 relative, traversal free, and checked after symlink resolution to remain inside
@@ -270,8 +271,9 @@ is set in the environment.
 A change to any of these starts a new profile epoch:
 
 ```text
-version, source.repository, source.importPrefix, source.project,
-source.license, source.refs.anchorCommit, destination.module,
+released engine version, profile version, source.repository,
+source.importPrefix, source.project, source.license, source.refs.anchorCommit,
+destination.module,
 destination.rootPackage, destination.internalPrefix, destination.summary,
 packages, prune, deny, closure.includeTests, types, dependencies,
 patches, facade, release, commit, determinism.toolchain
