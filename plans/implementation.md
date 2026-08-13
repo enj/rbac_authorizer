@@ -26,7 +26,7 @@ Generated replay commits preserve the upstream author, author date, message, rel
 
 1. The template has no root `go.mod`. The engine is the nested module `github.com/enj/soapbox/tools`.
 2. `tools/soapbox.go` exposes the small public entry point used by template derived repositories. All engine implementation remains under `tools/internal/`.
-3. `soapbox setup` creates the generated repository's root module, replaces the copied engine with a small nested `tools` module and command shim, and pins that shim to an immutable `tools/vX.Y.Z` engine release. Tool dependencies never enter the generated library's module graph.
+3. `soapbox setup` creates the generated repository's root module, replaces the copied engine with a small nested `tools` module and command shim, and pins that shim plus the engine's indirect graph roots to an immutable `tools/vX.Y.Z` engine release. The complete verified checksums let the shim run from a clean cache without editing module metadata. Tool dependencies never enter the generated library's module graph.
 4. Setup uses an explicit payload allowlist. Repository planning files, `.claude/`, engine source, engine tests, and development documentation are removed from the derived repository before its first generated tag.
 5. Generated library source, `soapbox.yaml`, patches, the nested tool shim, and workflows coexist on the default branch. Replay commits modify only generated paths. Configuration or engine changes form explicit profile epochs and never rewrite published history.
 
@@ -193,18 +193,17 @@ pkg/apis/rbac/v1  with only doc.go and evaluation_helpers.go
 
 The retained authorizer and validation code already uses `k8s.io/api/rbac/v1` types. `evaluation_helpers.go` remains because matcher functions and `CompactString` do not exist in staging. The removed registration, conversion, defaulting, and validation files are not used by the selected authorizer path. Removing them also stops import time mutation of `k8s.io/api/rbac/v1.SchemeBuilder`. This intentional behavior change is rendered into `docs/behavior-changes.md`, generated `NOTICE`, and package provenance.
 
-The real external build baseline is recorded in `testdata/closure/rbac-v1.36.1.json` rather than a hand maintained direct module list:
+The real external build baseline is recorded by the completed proof in `docs/rbac-v1.36.1-proof.md`; the exact closure shape is checked in at `testdata/closure/rbac-v1.36.1.json`:
 
 ```text
-external boundary packages       20
-non-stdlib transitive packages  211
+external boundary packages       11
+non-stdlib transitive packages  198
 compiled modules                 42
-module zip bytes           about 37.7 MB
-pruned module graph nodes       154
-go.sum lines               about 195
+module graph nodes              139
+go.sum lines                    133
 ```
 
-Package, module, and graph counts are exact. Byte size and `go.sum` line count use narrow documented tolerances. `k8s.io/component-base` is included as a transitive staging dependency.
+Package, module, graph, and checksum-line counts are exact for the pinned release. `k8s.io/component-base` is included as a transitive staging dependency.
 
 ### 3. Patch application
 
@@ -216,17 +215,20 @@ A failed patch stops the complete ref transaction. The run writes a deterministi
 
 `tools/internal/typeswap` implements `prefer-external`. It treats type replacement as a proof obligation, not a textual rewrite.
 
-An internal API type can be replaced or its source package pruned only when all analyses pass:
+Reachability first distinguishes a real type substitution from dead-package pruning. A real substitution is allowed only when all applicable analyses pass:
 
 1. Upstream generator markers identify an explicit internal and external type pairing.
-2. Conversion code is field preserving and has no manual or lossy logic.
-3. Retained selector use and full method sets remain compatible.
-4. Field names, order, recursive types, JSON tags, and protobuf tags match.
-5. Removed initialization and global mutations are either unobservable from the selected API or explicitly documented and tested as behavior changes.
+2. Every retained reference that names the internal package is enumerated for rewriting.
+3. Conversion code is field preserving and has no manual or lossy logic.
+4. Retained selector use and full method sets remain compatible.
+5. Field names, order, recursive types, JSON tags, and protobuf tags match.
+6. Removed initialization and global mutations are either unobservable from the selected API or explicitly documented and tested as behavior changes.
 
-Hand written conversions, missing methods, lossy fields, runtime scheme differences required by the facade, or unproved global effects block substitution.
+Hand written conversions, missing methods, lossy fields, runtime scheme differences required by the facade, or unproved global effects block a real substitution.
 
-For RBAC no retained type is rewritten. The analysis verifies that pruning the internal package is safe because retained code already uses `k8s.io/api/rbac/v1`. A pre-prune and post-prune facade manifest must be byte identical for the selected public API.
+Dead-package pruning makes no substitution claim. It requires the internal package to be absent from the retained closure, zero retained references to its symbols, at least one retained package already importing the configured external package, a valid upstream marker pair, no observable global effect, and byte-identical pre-prune and post-prune facade manifests. Conversion, method-set, and field-identity checks are recorded as inapplicable in this mode, because no Go value changes type.
+
+RBAC follows that dead-package path. Retained code already uses `k8s.io/api/rbac/v1`; Kubernetes' unversioned internal declarations intentionally omit public serialization tags and carry helpers such as `CompactString` that the public declarations do not. No retained type is rewritten, and the analysis must not misreport those intentionally different declarations as interchangeable.
 
 Dangling generator markers in retained `pkg/apis/rbac/v1/doc.go` are stripped only when their target or generated output was pruned. Every removed marker is listed in provenance. Other package documentation and `+groupName` remain untouched.
 

@@ -117,7 +117,8 @@ compare measurements with tolerance while comparing the exact shape literally.
 
 `prefer-external` is a proof obligation, not a textual rewrite. See
 [dependency-policy.md](dependency-policy.md#public-api-type-preference) for the
-five analyses that must pass.
+reachability check and the proofs that apply to an actual rewrite versus an
+already-unreachable internal package.
 
 ## `dependencies`
 

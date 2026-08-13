@@ -17,16 +17,16 @@ The first target is `monis.app/kk/rbac_authorizer`, sourced from `plugin/pkg/aut
 
 ## Status
 
-The local engine, release projection, replay, state, GitHub App client, setup transformation, and append-only publication planner are implemented. The remaining delivery gate is the documented real Kubernetes RBAC dry run and review of its exact outward-action manifest. No remote repository, vanity page, branch, or module tag is created by the development workflow.
+The local engine, release projection, replay, state, GitHub App client, setup transformation, and append-only publication planner are implemented. The real Kubernetes RBAC dry run is complete and documented in [`docs/rbac-v1.36.1-proof.md`](docs/rbac-v1.36.1-proof.md). The remaining delivery gate is review and fresh approval of the exact outward-action manifest. No remote repository, vanity page, network branch, or public module tag is created by the development workflow.
 
 The durable requirements and approved design are in [`plans/`](plans/).
 
 Known limitations of the engine as it stands are listed in
 [docs/setup.md](docs/setup.md#current-limitations). In short: exact release tags
-only, no branch generation, no backfill of prior releases, no epoch graft, no
-staging-package materialization, no vanity page generation, and publication
-rehearsed against a local destination because listing a network remote's refs is
-not yet implemented.
+only, no branch generation, no retained-reference type rewrite, no backfill of
+prior releases, no epoch graft, no staging-package materialization, no vanity
+page generation, and publication rehearsed against a local destination because
+listing a network remote's refs is not yet implemented.
 
 ## Architecture
 
@@ -39,8 +39,8 @@ not yet implemented.
    derived repository compiles against.
 3. `soapbox setup` creates the derived repository's root module, replaces the
    copied engine with a small nested `tools` module and command shim, and pins
-   that shim to an immutable `tools/vX.Y.Z` release. Tool dependencies never
-   enter the generated library's module graph.
+   that shim plus its indirect graph roots to an immutable `tools/vX.Y.Z`
+   release. Tool dependencies never enter the generated library's module graph.
 4. Generated source, `soapbox.yaml`, patches, the shim, and workflows coexist on
    the default branch. Replay commits modify only generated paths. Configuration
    or engine changes form explicit profile epochs and never rewrite published
@@ -102,7 +102,9 @@ documentation is in [docs/setup.md](docs/setup.md#the-commands).
 3. one denied import, the exact unversioned `pkg/apis/rbac`, leaving its
    retained `/v1` helper subpackage in place;
 4. type policy `prefer-external`, which for RBAC prunes rather than rewrites,
-   because the retained code already uses `k8s.io/api/rbac/v1`;
+   because the retained code already uses `k8s.io/api/rbac/v1`; this is a
+   reachability proof, not a claim that the intentionally different internal and
+   public declarations have identical tags or methods;
 5. dependency policy `external` with an empty copy list, recorded in
    [docs/decisions/0001-no-staging-copy-rbac.md](docs/decisions/0001-no-staging-copy-rbac.md);
 6. 16 facade exports, 4 renaming aliases, and 2 compile-time assertions against
@@ -115,6 +117,7 @@ behaviour change, and it is recorded as one in
 
 ## Documentation
 
+- [Completed RBAC v1.36.1 local proof](docs/rbac-v1.36.1-proof.md)
 - [Setup and derived repositories](docs/setup.md)
 - [Configuration reference](docs/config-reference.md)
 - [Replay and profile epochs](docs/replay-model.md)

@@ -180,6 +180,7 @@ measurement.
 |---|---|
 | `ref <x> is a branch, and only a release tag can be generated from ...` | Branch generation is not implemented. Use a release tag. |
 | `... materializing a copied package is not implemented` | The profile proposes staging copies, or the policy approved some. Neither can be materialized today. |
+| `substituting <a> with <b> requires rewriting N retained references ...` | The equivalence proof passed, but generation cannot yet apply the enumerated type-reference edits. RBAC does not use this path. |
 | `release policy v1-to-v0 requires a v1 source tag, got ...` | The tag does not map under the release policy. |
 | `the source commit stages no module the root module requires ...` | The source commit is not a Kubernetes checkout of the expected shape. |
 | `the source commit declares module <a> but the profile is written against <b>` | Wrong source repository. |
@@ -196,6 +197,8 @@ measurement.
 | `the destination records release <a> and this run publishes <b>, which needs the commits between them replayed` | Backfill is not implemented. | Publish releases in order, or wait for backfill. |
 | `the destination records profile <a> and this run generated under <b>, which starts an epoch this engine cannot graft` | The profile hash changed. | Grafting a new epoch is not implemented. Compare `soapbox validate -format profile` output to see what changed. |
 | `publication requires a configured destination remote` | No remote, or a network remote whose refs cannot be listed. | Use a local rehearsal with `-local-remote`. |
+| `the destination has no setup-derived branch to preserve` | Sync would otherwise publish a generated-only root and discard the profile, shim, and workflows. | Run setup, commit its result, and synchronize from that checkout. |
+| `the setup-derived parent does not contain <path>` | The supplied destination is not a complete derived Soapbox repository. | Restore the setup-owned control-plane files before synchronizing. |
 | `the module was generated from an overridden source remote, so a tag claiming <url> would be a false provenance record` | `-source-remote` was used. | Do not publish a run that read from a mirror. |
 | `approval does not name this synchronization` | The hash does not match. | Re-read the manifest and quote its hash exactly. |
 

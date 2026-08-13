@@ -113,25 +113,29 @@ relaxable gate, so the refusal cannot be weakened by tuning numbers.
 ## Public API type preference
 
 A separate policy, but the same posture: substitution is a proof obligation, not
-a textual rewrite. `types.policy: prefer-external` runs five analyses per
-configured pair, and every one must pass.
+a textual rewrite. `types.policy: prefer-external` first decides whether any
+retained reference actually needs substitution, then runs the proofs applicable
+to that outcome.
 
 | Analysis | What it proves |
 |---|---|
 | `markers` | Upstream itself records the pairing: `+k8s:conversion-gen=<internal>` and `+k8s:conversion-gen-external-types=<external>` in the same file of the same package. A shared `groupName` corroborates; differing group names block. |
-| `conversions` | Generated `Convert_X_To_Y` bodies are mechanical — assignment, cast, `unsafe.Pointer` reinterpretation, a nested conversion, or the error check around one — and every field of the output type is assigned. Finding zero conversions is a blocker, not a pass. |
-| `methodSets` | Every exported method of each paired internal type exists on the external type with the same signature, and every internal symbol retained code names exists externally. Extra external methods are compatible growth, not a blocker. |
-| `fieldIdentity` | Recursive structural equality: field names, field order, embeddedness, exportedness, `json` and `protobuf` tags, container kinds, array lengths, channel direction, signature arity and variadicity, interface method sets. Zero comparisons is a vacuous pass and is treated as a blocker. |
+| `reachability` | Either retained package-scope references are enumerated for rewriting, or the internal package is absent from the retained closure while retained code already imports the configured external package. A retained blank import blocks because it depends on import-time effects a type rewrite cannot preserve. This prevents an empty use set from becoming a vacuous pass. |
+| `conversions` | For a real rewrite, generated `Convert_X_To_Y` bodies are mechanical — assignment, cast, `unsafe.Pointer` reinterpretation, a nested conversion, or the error check around one — and every field of the output type is assigned. Finding zero conversions is a blocker, not a pass. |
+| `methodSets` | For a real rewrite, every exported method of each paired internal type exists on the external type with the same signature, and every internal symbol retained code names exists externally. Extra external methods are compatible growth, not a blocker. |
+| `fieldIdentity` | For a real rewrite, recursive structural equality covers field names, field order, embeddedness, exportedness, `json` and `protobuf` tags, container kinds, array lengths, channel direction, signature arity and variadicity, and interface method sets. Zero comparisons is a vacuous pass and is treated as a blocker. |
 | `globalEffects` | Every import-time effect of the internal package is inventoried. A reachable effect blocks; an unreachable one becomes a documented behaviour change. |
 
-Any blocker refuses the substitution. So does any difference in the generated
-public API, whatever the five analyses concluded.
+Any applicable blocker refuses the change. So does any difference in the
+generated public API.
 
-Where the analyses pass and retained code names no internal symbol, the outcome
-is `prune-internal` rather than a rewrite: the internal package is removed and
-nothing is textually substituted. That is the RBAC outcome — retained code
-already uses `k8s.io/api/rbac/v1`, so there is nothing to rewrite, and the
-observation the whole conclusion rests on is checked explicitly.
+When reachability proves that retained code names no internal symbol, the outcome
+is `prune-internal`: no Go value changes type, so conversion bodies, method sets,
+and field or serialization identity are explicitly reported as inapplicable
+rather than falsely reported as equal. That is the RBAC outcome. Retained code
+already uses `k8s.io/api/rbac/v1`; the unversioned internal declarations omit
+public wire tags and carry helpers the public types do not, but none of those
+declarations is substituted.
 
 ## Module composition
 
