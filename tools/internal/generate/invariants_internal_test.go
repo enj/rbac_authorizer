@@ -52,6 +52,27 @@ func TestCheckDisjointAllowsIndexOnlyInCache(t *testing.T) {
 	}
 }
 
+func TestPrePruneConfigDropsPostPruneLimits(t *testing.T) {
+	cfg := &config.Config{
+		Prune: config.Prune{Files: []string{"x.go"}},
+		Deny:  config.Deny{Imports: []string{"example.com/internal"}},
+		Closure: config.Closure{
+			Golden: "shape.json",
+			Limits: config.ClosureLimits{MaxPackages: 3, MaxPackageGrowth: 2},
+		},
+	}
+	baseline := prePruneConfig(cfg)
+	if baseline.Closure.Golden != "" || baseline.Closure.Limits != (config.ClosureLimits{}) {
+		t.Fatalf("baseline closure controls = %#v, want no golden or post-prune limits", baseline.Closure)
+	}
+	if len(baseline.Prune.Files) != 0 || len(baseline.Deny.Imports) != 0 {
+		t.Fatalf("baseline retained prune/deny controls: %#v %#v", baseline.Prune, baseline.Deny)
+	}
+	if cfg.Closure.Limits.MaxPackageGrowth != 2 || len(cfg.Prune.Files) != 1 {
+		t.Fatal("building the baseline mutated the caller's profile")
+	}
+}
+
 func TestResolveStagingStartsWithAnEmptyIndex(t *testing.T) {
 	root, err := gomodmap.ParseRootModule("go.mod", []byte(`module k8s.io/kubernetes
 

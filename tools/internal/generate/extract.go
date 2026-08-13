@@ -157,5 +157,9 @@ func prePruneConfig(cfg *config.Config) *config.Config {
 	clone.Prune = config.Prune{}
 	clone.Deny = config.Deny{}
 	clone.Closure.Golden = ""
+	// Limits describe the post-prune product. Applying them to the intentionally
+	// larger baseline can make generation refuse before it can prove what pruning
+	// removes (RBAC grows by three packages before pruning and by two after).
+	clone.Closure.Limits = config.ClosureLimits{}
 	return &clone
 }
