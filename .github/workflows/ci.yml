@@ -1,0 +1,96 @@
+# Engine verification for the soapbox template repository itself.
+#
+# This workflow verifies the Go engine under tools/. It never holds a
+# credential: no App secret is available to it, its token may only read, and the
+# checkout keeps no token in the work tree for a later step to find. Pull
+# request code runs here, so anything this job could reach, a contributor could
+# reach.
+#
+# Every action is pinned to a full commit object name. A tag is not a pin,
+# because GitHub tags move and a moved action is arbitrary code running with
+# whatever permissions the job holds. The tag beside each SHA is a comment for
+# the reader. These are the same two pins the generated workflows use, recorded
+# in tools/internal/setup/workflows.go.
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify the engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The version is the exact patch release soapbox.yaml pins under
+      # determinism.toolchain. gofmt output and generated module metadata are
+      # toolchain dependent, so the engine refuses to run under any other
+      # toolchain and CI must install the one it names.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          check-latest: false
+          cache-dependency-path: tools/go.sum
+
+      - name: Build
+        working-directory: tools
+        run: go build ./...
+
+      - name: Vet
+        working-directory: tools
+        run: go vet ./...
+
+      - name: Test
+        working-directory: tools
+        run: go test ./...
+
+      # The race detector needs cgo and a supported platform, both of which
+      # ubuntu-latest provides. It is a separate step from the plain test run so
+      # a data race is distinguishable from a failing assertion.
+      - name: Test under the race detector
+        working-directory: tools
+        run: go test -race ./...
+
+      # The linter release is pinned here rather than through a Go tool
+      # directive, because a directive would add golangci-lint and its several
+      # hundred analyser modules to the engine module graph that every go mod
+      # tidy, go test, and go build would then have to resolve. The engine
+      # deliberately depends on one library.
+      - name: Format
+        working-directory: tools
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 fmt --config ../.golangci.yml
+
+      # Formatting is gated by rewriting and then asserting nothing changed,
+      # which is a decision the exit code cannot get wrong. The formatters are
+      # gofmt and goimports, configured in .golangci.yml.
+      - name: Assert gofmt and goimports produce no diff
+        run: git diff --exit-code
+
+      - name: Lint
+        working-directory: tools
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run --config ../.golangci.yml
+
+      # The engine reading its own profile. This is the same read-only
+      # invocation the generated ci.yml runs in a derived repository.
+      - name: Validate the profile
+        working-directory: tools
+        run: go run ./cmd/soapbox validate -dir ..

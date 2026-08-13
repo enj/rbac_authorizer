@@ -15,8 +15,8 @@
 # module graph, which every go mod tidy, go test, and go build would then have to
 # resolve, and the engine deliberately depends on one library. goimports needs no
 # pin either, because golangci-lint runs it through the formatters section below
-# and gofmt ships with the pinned toolchain. CI pins the linter release itself,
-# which the workflow phase adds.
+# and gofmt ships with the pinned toolchain. The linter release is pinned in
+# .github/workflows/ci.yml instead, which runs it as go run <module>@<version>.
 version: "2"
 
 run:

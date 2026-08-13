@@ -1,0 +1,87 @@
+# Template self-test.
+#
+# ci.yml proves the engine compiles and its tests pass. This workflow proves the
+# other half: that this repository is still a usable soapbox template, and that
+# the transformation a derived repository depends on still runs.
+#
+# It holds no credential and performs no outward action. The setup invocation
+# below is a dry run: soapbox setup reports a manifest and writes nothing unless
+# it is given both -apply and the manifest hash a dry run produced, and neither
+# appears here. Nothing is pushed, no repository is created, and no tag is
+# published.
+#
+# The full upstream dry run described in plans/implementation.md is deliberately
+# not a CI job. It clones kubernetes/kubernetes and drives the Go toolchain over
+# the resulting module graph, which is a local procedure run by a maintainer at
+# the outward-action gate, not something a pull request should trigger.
+name: template-selftest
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: template-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    name: Transform this checkout as a template
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          check-latest: false
+          cache-dependency-path: tools/go.sum
+
+      - name: Validate the profile
+        working-directory: tools
+        run: go run ./cmd/soapbox validate -dir ..
+
+      # A dry run against the real checkout, which is what makes this a self
+      # test rather than another unit test: it asserts that this repository
+      # still carries every template marker, that its work tree is clean, that
+      # no tracked path collides with one setup composes, and that the whole
+      # payload can be classified into writes, keeps, and deletes.
+      #
+      # The engine version is a shape check. A plan resolves nothing over the
+      # network, so the value only has to be a canonical release spelling; the
+      # tag it names is created at the outward-action gate.
+      #
+      # This step must run before any step that could modify the work tree,
+      # because setup refuses a repository with uncommitted files in it.
+      - name: Plan the template transformation
+        working-directory: tools
+        run: go run ./cmd/soapbox setup -dir .. -engine-version v0.1.0 -format json
+
+      # A plan classifies. Applying it, and rejecting a mismatched approval, is
+      # covered by the setup package against real temporary Git repositories,
+      # and the command layer is covered alongside it because the approval pair
+      # is a command line contract as much as an engine one.
+      - name: Apply the transformation on temporary repositories
+        working-directory: tools
+        run: go test ./internal/setup/... ./internal/cli/...
+
+      # The generation pipeline over real temporary repositories: extraction,
+      # pruning, relocation, rewriting, module composition, and the refusals
+      # that keep an unsupported run from producing a module.
+      - name: Generate modules on temporary repositories
+        working-directory: tools
+        run: go test ./internal/extract/... ./internal/generate/... ./internal/sync/... ./internal/publish/...
