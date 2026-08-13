@@ -1,8 +1,11 @@
 package typeswap
 
 import (
+	"fmt"
 	"go/types"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 // usage is one retained reference to a symbol of the internal package.
@@ -28,6 +31,11 @@ type usageSet struct {
 	Symbols []string
 	// Packages are the distinct retained packages that reference them, sorted.
 	Packages []string
+	// Importers are retained packages whose surviving files import Internal.
+	Importers []string
+	// BlankImporters depend specifically on Internal's import-time effects and
+	// cannot be converted into a type rewrite.
+	BlankImporters []string
 }
 
 // retainedUses collects every reference a retained package makes to the
@@ -72,6 +80,7 @@ func retainedUses(graph *Graph, internal string) usageSet {
 			})
 		}
 	}
+	set.Importers, set.BlankImporters = retainedImporters(graph, internal)
 
 	slices.SortFunc(set.Usages, func(a, b usage) int {
 		if c := compareStrings(a.Package, b.Package); c != 0 {
@@ -88,8 +97,12 @@ func retainedUses(graph *Graph, internal string) usageSet {
 	}
 	slices.Sort(set.Symbols)
 	slices.Sort(set.Packages)
+	slices.Sort(set.Importers)
+	slices.Sort(set.BlankImporters)
 	set.Symbols = slices.Compact(set.Symbols)
 	set.Packages = slices.Compact(set.Packages)
+	set.Importers = slices.Compact(set.Importers)
+	set.BlankImporters = slices.Compact(set.BlankImporters)
 	return set
 }
 
@@ -136,14 +149,77 @@ func objectKind(object types.Object) string {
 // simply dead code. Recording which packages prove that keeps the conclusion
 // checkable rather than asserted.
 func externalImporters(graph *Graph, external string) []string {
-	var importers []string
+	importers, _ := retainedImporters(graph, external)
+	return importers
+}
+
+// retainedImporters lists packages whose surviving syntax imports importPath.
+// Package.Imports cannot answer this because it aggregates files the profile may
+// prune, which would turn an import that disappears into reachability evidence.
+func retainedImporters(graph *Graph, importPath string) (importers, blank []string) {
 	for _, pkg := range graph.retainedPackages() {
-		if slices.Contains(pkg.Imports, external) {
-			importers = append(importers, pkg.ImportPath)
+		if pkg.ImportPath == importPath {
+			continue
+		}
+		for _, file := range pkg.Syntax {
+			if graph.isPruned(graph.position(file.Pos())) {
+				continue
+			}
+			for _, spec := range file.Imports {
+				found, err := strconv.Unquote(spec.Path.Value)
+				if err != nil || found != importPath {
+					continue
+				}
+				importers = append(importers, pkg.ImportPath)
+				if spec.Name != nil && spec.Name.Name == "_" {
+					blank = append(blank, pkg.ImportPath)
+				}
+			}
 		}
 	}
 	slices.Sort(importers)
-	return slices.Compact(importers)
+	slices.Sort(blank)
+	return slices.Compact(importers), slices.Compact(blank)
+}
+
+// analyzeReachability decides whether this pair describes a real substitution
+// or an internal package that is already dead after pruning.
+//
+// A dead-package proof is deliberately narrower than a type-identity proof. If
+// no retained reference names the internal package, no Go value changes type and
+// differences in serialization tags or unused methods cannot affect the output.
+// The internal package must actually be absent from the retained closure, and
+// retained code must already use the configured external package; otherwise an
+// empty use set would turn a stale or misspelled pair into a vacuous pass.
+func analyzeReachability(graph *Graph, pair Pair, uses usageSet, importers []string) AnalysisReport {
+	var evidence, blockers []string
+	if slices.Contains(graph.Retained, pair.Internal) {
+		blockers = append(blockers, pair.Internal+" remains in the retained closure, so it cannot be reported as a pruned internal package")
+	}
+	if len(uses.BlankImporters) > 0 {
+		blockers = append(blockers, fmt.Sprintf("retained packages %s blank-import %s for its side effects, which a type substitution cannot preserve",
+			strings.Join(uses.BlankImporters, ", "), pair.Internal))
+	}
+	if len(uses.Usages) > 0 {
+		evidence = append(evidence, fmt.Sprintf("%d retained references to %s require substitution with %s",
+			len(uses.Usages), pair.Internal, pair.External))
+		return analysisReport(AnalysisReachability, evidence, blockers)
+	}
+	if len(uses.Importers) > 0 {
+		blockers = append(blockers, fmt.Sprintf("retained packages %s import %s but expose no replaceable package-scope symbol use, so pruning would remove an unexplained dependency",
+			strings.Join(uses.Importers, ", "), pair.Internal))
+		return analysisReport(AnalysisReachability, evidence, blockers)
+	}
+
+	evidence = append(evidence, "no retained package references "+pair.Internal+", so pruning it changes no retained Go type identity")
+	if len(importers) == 0 {
+		blockers = append(blockers, "no retained package imports "+pair.External+
+			", so the claim that retained code already uses the external package is unproved")
+	} else {
+		evidence = append(evidence, fmt.Sprintf("%d retained packages already import %s, so no reference rewrite is required",
+			len(importers), pair.External))
+	}
+	return analysisReport(AnalysisReachability, evidence, blockers)
 }
 
 // exportedNames returns a package's exported scope names, sorted.

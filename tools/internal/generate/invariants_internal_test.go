@@ -3,14 +3,18 @@ package generate
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/enj/soapbox/tools/internal/closure"
 	"github.com/enj/soapbox/tools/internal/config"
+	"github.com/enj/soapbox/tools/internal/extract"
 	"github.com/enj/soapbox/tools/internal/gomodmap"
 	"github.com/enj/soapbox/tools/internal/modgen"
 	"github.com/enj/soapbox/tools/internal/relocate"
+	"github.com/enj/soapbox/tools/internal/typeswap"
 )
 
 func TestCloneConfigIsDeep(t *testing.T) {
@@ -70,6 +74,82 @@ func TestPrePruneConfigDropsPostPruneLimits(t *testing.T) {
 	}
 	if cfg.Closure.Limits.MaxPackageGrowth != 2 || len(cfg.Prune.Files) != 1 {
 		t.Fatal("building the baseline mutated the caller's profile")
+	}
+}
+
+func TestPrepareUpstreamModuleCopiesOnlyProductionClosure(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	packageDir := filepath.Join(source, "pkg", "app")
+	if err := os.MkdirAll(packageDir, 0o750); err != nil {
+		t.Fatalf("source package directory: %v", err)
+	}
+	files := map[string]string{
+		"app.go":      "package app\n",
+		"app_test.go": "package app\n",
+		"extra.go":    "package app\n",
+		"tool":        "fixture tool\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(packageDir, name), []byte(contents), 0o600); err != nil {
+			t.Fatalf("source file %s: %v", name, err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(packageDir, "tool"), 0o751); err != nil {
+		t.Fatalf("source tool mode: %v", err)
+	}
+
+	r := &run{
+		paths: Paths{Work: filepath.Join(root, "work"), PreWorktree: source},
+		pre: &extract.Result{Report: extract.Report{
+			Closure: extract.ClosureReport{Report: closure.ClosureReport{Exact: closure.ExactShape{Files: []string{
+				"pkg/app/app.go",
+				"pkg/app/app_test.go",
+				"pkg/app/tool",
+			}}}},
+		}},
+	}
+	dir, err := r.prepareUpstreamModule(t.Context())
+	if err != nil {
+		t.Fatalf("prepare upstream module: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "pkg", "app", "app.go"))
+	if err != nil {
+		t.Fatalf("read copied production file: %v", err)
+	}
+	if string(got) != files["app.go"] {
+		t.Fatalf("copied production file = %q, want %q", got, files["app.go"])
+	}
+	for _, name := range []string{"app_test.go", "extra.go"} {
+		if _, err := os.Stat(filepath.Join(dir, "pkg", "app", name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("excluded file %s stat error = %v, want not exist", name, err)
+		}
+	}
+	info, err := os.Stat(filepath.Join(dir, "pkg", "app", "tool"))
+	if err != nil {
+		t.Fatalf("inspect copied tool: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o751); got != want {
+		t.Fatalf("copied tool mode = %v, want %v", got, want)
+	}
+}
+
+func TestCheckSubstitutionsRefusesUnappliedRewrites(t *testing.T) {
+	err := checkSubstitutions(&typeswap.Result{Pairs: []typeswap.PairReport{{
+		Internal: "k8s.io/kubernetes/pkg/apis/example",
+		External: "k8s.io/api/example/v1",
+		Action:   typeswap.ActionRewriteReferences,
+		Rewrites: []typeswap.Rewrite{{
+			Package:     "k8s.io/kubernetes/pkg/consumer",
+			Symbol:      "k8s.io/kubernetes/pkg/apis/example.Value",
+			Replacement: "k8s.io/api/example/v1.Value",
+		}},
+	}}})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("rewrite error = %v, want ErrUnsupported", err)
+	}
+	if !strings.Contains(err.Error(), "requires rewriting 1 retained references") {
+		t.Fatalf("rewrite error does not explain the unapplied edit: %v", err)
 	}
 }
 
@@ -166,6 +246,17 @@ func TestReportJSONDoesNotEscapeEvidence(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "<work> && <proxy>") {
 		t.Fatalf("report JSON escaped evidence: %s", data)
+	}
+}
+
+func TestRecordExtractKeepsOnlyPostPruneNotices(t *testing.T) {
+	report := Report{}
+	report.recordExtract(
+		&extract.Result{Report: extract.Report{Notices: []string{"baseline-only marker"}}},
+		&extract.Result{Report: extract.Report{Notices: []string{"published-tree notice"}}},
+	)
+	if got, want := strings.Join(report.Notices, "\n"), "published-tree notice"; got != want {
+		t.Fatalf("generation notices = %q, want %q", got, want)
 	}
 }
 

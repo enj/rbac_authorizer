@@ -25,6 +25,7 @@ const (
 // Analysis names, in the order they are reported.
 const (
 	AnalysisMarkers       = "markers"
+	AnalysisReachability  = "reachability"
 	AnalysisConversions   = "conversions"
 	AnalysisMethodSets    = "methodSets"
 	AnalysisFieldIdentity = "fieldIdentity"

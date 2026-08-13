@@ -302,9 +302,10 @@ func TestRBACProofsAllHold(t *testing.T) {
 		mentions string
 	}{
 		{typeswap.AnalysisMarkers, "+k8s:conversion-gen=" + internalRBAC},
-		{typeswap.AnalysisConversions, "Convert_v1_Role_To_rbac_Role is field preserving"},
-		{typeswap.AnalysisMethodSets, "equivalent method sets"},
-		{typeswap.AnalysisFieldIdentity, "match recursively on field names"},
+		{typeswap.AnalysisReachability, "no retained package references " + internalRBAC},
+		{typeswap.AnalysisConversions, "not required to prune the unreachable package"},
+		{typeswap.AnalysisMethodSets, "not required to prune the unreachable package"},
+		{typeswap.AnalysisFieldIdentity, "not required to prune the unreachable package"},
 		{typeswap.AnalysisGlobalEffects, "unobservable through the generated API"},
 	}
 	for _, test := range tests {
@@ -319,6 +320,62 @@ func TestRBACProofsAllHold(t *testing.T) {
 			evidence := strings.Join(analysis.Evidence, "\n")
 			if !strings.Contains(evidence, test.mentions) {
 				t.Errorf("%s evidence does not mention %q:\n%s", test.analysis, test.mentions, evidence)
+			}
+		})
+	}
+}
+
+func TestDeadPackagePruningRequiresReachabilityEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		mutate   func(*typeswap.Graph)
+		mentions string
+	}{
+		{
+			name: "internal package remains retained",
+			mutate: func(graph *typeswap.Graph) {
+				graph.Retained = append(graph.Retained, internalRBAC)
+			},
+			mentions: "remains in the retained closure",
+		},
+		{
+			name: "retained code does not use the external package",
+			mutate: func(graph *typeswap.Graph) {
+				// The versioned package imports both sides only from its pruned
+				// conversion file. That removed import must not count as evidence.
+				graph.Retained = []string{internalRBACV1}
+			},
+			mentions: "no retained package imports " + externalRBAC,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			f := newFixture(t, rbacFiles)
+			graph := f.graph(rbacRetained...)
+			graph.PrunedFiles = rbacPruned
+			test.mutate(graph)
+			analyzer, err := typeswap.New(ctx, typeswap.Options{
+				Policy: typeswap.PolicyPreferExternal,
+				Pairs:  []typeswap.Pair{rbacPair},
+			})
+			if err != nil {
+				t.Fatalf("new analyzer: %v", err)
+			}
+			result, err := analyzer.Analyze(ctx, graph)
+			if err != nil {
+				t.Fatalf("analyze: %v", err)
+			}
+			report, _ := result.Pair(internalRBAC)
+			if report.Action != typeswap.ActionBlocked {
+				t.Fatalf("action = %q, want %q", report.Action, typeswap.ActionBlocked)
+			}
+			analysis, _ := report.Analysis(typeswap.AnalysisReachability)
+			if blockers := strings.Join(analysis.Blockers, "\n"); !strings.Contains(blockers, test.mentions) {
+				t.Errorf("reachability blockers do not mention %q:\n%s", test.mentions, blockers)
 			}
 		})
 	}

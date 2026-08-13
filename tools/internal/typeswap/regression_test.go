@@ -63,7 +63,7 @@ import "strings"
 func sanitize(in string) string { return strings.TrimSpace(in) }
 `
 
-	report := analyzeFiles(t, files)
+	report := analyzeFiles(t, withRetainedUse(files))
 	if report.Action != typeswap.ActionBlocked {
 		t.Fatalf("action = %q, want %q", report.Action, typeswap.ActionBlocked)
 	}
@@ -87,7 +87,7 @@ func TestConversionCastIsStillMechanical(t *testing.T) {
 		"	out.Kind = in.Kind",
 		"	out.Kind = string(in.Kind)")
 
-	report := analyzeFiles(t, files)
+	report := analyzeFiles(t, withRetainedUse(files))
 	analysis, _ := report.Analysis(typeswap.AnalysisConversions)
 	if !analysis.Passed {
 		t.Fatalf("a real cast was refused: %v", analysis.Blockers)
@@ -128,7 +128,7 @@ func TestContainerShapeMismatchIsRefused(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			report := analyzeFiles(t, mutate(externalTypes, test.old, test.swap))
+			report := analyzeFiles(t, withRetainedUse(mutate(externalTypes, test.old, test.swap)))
 			if report.Action != typeswap.ActionBlocked {
 				t.Fatalf("action = %q, want %q", report.Action, typeswap.ActionBlocked)
 			}
@@ -180,7 +180,7 @@ type Ring struct {
 	// and it is given a deadline so an exponential regression fails the test
 	// instead of hanging the package until the global timeout.
 	ctx := context.Background()
-	f := newFixture(t, files)
+	f := newFixture(t, withRetainedUse(files))
 	analyzer, err := typeswap.New(ctx, typeswap.Options{
 		Policy: typeswap.PolicyPreferExternal,
 		Pairs:  []typeswap.Pair{rbacPair},
@@ -315,7 +315,7 @@ type Resolver interface {
 	files[internalRBAC+"/types.go"] = strings.Replace(files[internalRBAC+"/types.go"],
 		"// Role is a namespaced set of rules.", iface+"\n// Role is a namespaced set of rules.", 1)
 
-	report := analyzeFiles(t, files)
+	report := analyzeFiles(t, withRetainedUse(files))
 	analysis, _ := report.Analysis(typeswap.AnalysisFieldIdentity)
 	if analysis.Passed {
 		t.Fatal("an interface with a changed method signature compared equal")
@@ -446,6 +446,27 @@ func TestPrunePathsAreNormalized(t *testing.T) {
 	}
 	if len(report.Rewrites) != 0 {
 		t.Errorf("rewrites = %v, want none; the pruned conversion file still counted as retained", report.Rewrites)
+	}
+}
+
+func TestBlankImportBlocksDeadPackagePruning(t *testing.T) {
+	t.Parallel()
+	files := mutate(validationPkg+"/rule.go",
+		`import (
+	rbacv1 "k8s.io/api/rbac/v1"
+)`,
+		`import (
+	rbacv1 "k8s.io/api/rbac/v1"
+	_ "k8s.io/kubernetes/pkg/apis/rbac"
+)`)
+
+	report := analyzeFiles(t, files)
+	if report.Action != typeswap.ActionBlocked {
+		t.Fatalf("action = %q, want %q", report.Action, typeswap.ActionBlocked)
+	}
+	analysis, _ := report.Analysis(typeswap.AnalysisReachability)
+	if blockers := strings.Join(analysis.Blockers, "\n"); !strings.Contains(blockers, "blank-import") {
+		t.Errorf("reachability blockers do not name the side-effect import:\n%s", blockers)
 	}
 }
 

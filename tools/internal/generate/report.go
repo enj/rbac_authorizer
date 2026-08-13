@@ -476,7 +476,10 @@ func (r *Report) recordExtract(pre, post *extract.Result) {
 	// before they reach the report.
 	r.addScrub(pre.Paths.Worktree, "<pre-worktree>")
 	r.addScrub(post.Paths.Worktree, "<post-worktree>")
-	r.addNotices(pre.Report.Notices...)
+	// Only the post-prune tree can become the generated module. The baseline is
+	// deliberately larger and contains generator markers and files the profile
+	// removes; promoting its notices to the generation would make strict mode
+	// reject findings that cannot exist in the published output.
 	r.addNotices(post.Report.Notices...)
 }
 

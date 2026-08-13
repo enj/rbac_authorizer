@@ -170,9 +170,11 @@ func TestGenerateProvesTheSubstitutionAgainstUpstreamIdentities(t *testing.T) {
 			pair.Action, typeswap.ActionPruneInternal, joinLines(pair.Blockers))
 	}
 
-	// The two analyses that need upstream evidence are the ones that prove the
-	// analysis saw real generated conversions rather than merely matching names.
-	for _, name := range []string{"markers", "conversions", "fieldIdentity"} {
+	// The reachability proof is the decisive RBAC fact: retained code already
+	// imports the public package and names no unversioned internal symbol. The
+	// structural analyses must say they are inapplicable, not claim that the
+	// intentionally different internal and public declarations are identical.
+	for _, name := range []string{"markers", "reachability", "conversions", "methodSets", "fieldIdentity"} {
 		analysis, ok := pair.Analysis(name)
 		if !ok {
 			t.Errorf("analysis %s was not run", name)
@@ -180,6 +182,9 @@ func TestGenerateProvesTheSubstitutionAgainstUpstreamIdentities(t *testing.T) {
 		}
 		if !analysis.Passed {
 			t.Errorf("analysis %s did not pass: %s", name, joinLines(analysis.Blockers))
+		}
+		if name != "markers" && name != "reachability" && !strings.Contains(strings.Join(analysis.Evidence, "\n"), "makes no claim that the declarations are interchangeable") {
+			t.Errorf("analysis %s does not explain why type identity is inapplicable", name)
 		}
 	}
 
@@ -196,6 +201,23 @@ func TestGenerateProvesTheSubstitutionAgainstUpstreamIdentities(t *testing.T) {
 	}
 }
 
+func TestGenerateIgnoresTestOnlyDependenciesDuringTypeProof(t *testing.T) {
+	ctx := t.Context()
+	e := newEndToEndWith(ctx, t, map[string]string{
+		"plugin/pkg/auth/authorizer/rbac/rbac_test.go": `package rbac
+
+import _ "k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac/bootstrappolicy"
+`,
+	}, nil)
+	result := e.generateOnce(ctx, t)
+
+	for _, file := range treePaths(result) {
+		if strings.HasSuffix(file, "_test.go") {
+			t.Fatalf("generated module includes test-only source %s", file)
+		}
+	}
+}
+
 // TestGenerateRefusesAnUnprovableSubstitution is the other half of the same
 // gate.
 //
@@ -206,7 +228,8 @@ func TestGenerateProvesTheSubstitutionAgainstUpstreamIdentities(t *testing.T) {
 func TestGenerateRefusesAnUnprovableSubstitution(t *testing.T) {
 	ctx := t.Context()
 	e := newEndToEndWith(ctx, t, map[string]string{
-		"pkg/apis/rbac/v1/zz_generated.conversion.go": conversionsWithoutFunctions,
+		"pkg/apis/rbac/v1/doc.go": strings.Replace(upstreamAPIDoc,
+			"// +k8s:conversion-gen-external-types="+stagingAPI+"/rbac/v1\n", "", 1),
 	}, nil)
 
 	result, err := generateFailure(ctx, t, e.opts)

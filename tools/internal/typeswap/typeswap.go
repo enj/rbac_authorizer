@@ -1,45 +1,31 @@
 // Package typeswap proves that an internal Kubernetes API type can be replaced
-// by its public counterpart, or that the internal package can simply be pruned.
+// by its public counterpart, or that an unreachable internal package can be
+// pruned without replacing any type at all.
 //
-// The policy this implements is prefer-external, and the load bearing word is
+// The policy this implements is prefer-external, and the load-bearing word is
 // prove. Replacing k8s.io/kubernetes/pkg/apis/rbac with k8s.io/api/rbac/v1 is
-// not a rename: the two declarations are different Go types, they are wire
-// compatible only because generated conversions say so, and the internal
-// package does things at import time that the public one does not. A textual
-// rewrite that got any of that wrong would produce a module that compiles,
-// passes its tests, and silently drops a field or stops registering a type.
+// not a rename: the declarations have distinct Go identities and can differ in
+// methods, serialization tags, and import-time behavior. A textual rewrite that
+// got any of that wrong could compile while silently changing behavior.
 //
-// So substitution is treated as a proof obligation with five parts, and all
-// five have to hold:
+// Reachability decides which proof is required. If retained code still names an
+// internal symbol, the change is a real substitution and generator markers,
+// conversion shape, method sets, recursive field identity, global effects, and
+// the generated public API must all permit it. If no retained code names the
+// internal package, no value changes type. In that dead-package case the
+// internal package must be absent from the retained closure, retained code must
+// already import the configured external package, generator markers must confirm
+// the intended pair, global effects must be unobservable, and the public facade
+// must be unchanged. Conversion, method-set, and field-identity analyses are
+// explicitly reported as inapplicable rather than falsely claiming that two
+// declarations which are never substituted are interchangeable.
 //
-//  1. Markers. An upstream generator directive must name the pairing. The
-//     engine does not decide that two packages describe the same API because
-//     their types have the same names; upstream already recorded that decision
-//     and the analysis reads it.
-//  2. Conversion shape. The generated conversion functions must be field
-//     preserving. A body that only assigns, casts, reinterprets through
-//     unsafe.Pointer, or calls a nested conversion is mechanical. A body with a
-//     loop that transforms, a conditional that drops a value, or a call to
-//     anything else is hand written logic, and hand written logic means the two
-//     types are not the same shape however similar they look.
-//  3. Method sets. Every retained use of an internal type has to keep working,
-//     which means the external type needs the same exported methods with the
-//     same signatures.
-//  4. Field identity. Recursively, the two types must agree on field names,
-//     field order, field types, JSON tags, and protobuf tags. Order and tags
-//     matter because these types are serialized: a reordered protobuf tag is a
-//     wire incompatibility that no compiler will catch.
-//  5. Global effects. Whatever the internal package does at import time, such
-//     as registering into a scheme, either has to be unobservable through the
-//     generated public API or has to be recorded as a documented behavior
-//     change with a test.
-//
-// For RBAC the answer is the simplest of the three: no retained type is
-// rewritten at all, because the retained code already uses k8s.io/api/rbac/v1.
-// The internal package is pruned rather than substituted, and what the analysis
-// proves is that pruning it is safe. The scheme registration that pruning
-// removes is a real behavior change, so it is reported as one rather than
-// omitted because it happens to be harmless here.
+// For RBAC the answer is the dead-package case. Retained code already uses
+// k8s.io/api/rbac/v1, while Kubernetes' unversioned internal types intentionally
+// omit public wire tags and carry helpers the public types do not. The internal
+// package is pruned without rewriting a retained reference. Scheme registration
+// removed by that pruning is still a real behavior change and is reported rather
+// than omitted because it is harmless to this facade.
 //
 // The package is a pure analyzer over an already loaded, type checked graph. It
 // never opens a second worktree and never reads a file the caller did not put
@@ -116,7 +102,7 @@ func (a *Analyzer) Analyze(ctx context.Context, graph *Graph) (*Result, error) {
 	return &Result{Schema: ReportSchema, Policy: a.opts.Policy, Pairs: reports}, nil
 }
 
-// analyzePair runs the five proofs for one pair and decides the action.
+// analyzePair runs the reachability proof and every proof applicable to one pair.
 func (a *Analyzer) analyzePair(ctx context.Context, graph *Graph, pair Pair) (PairReport, error) {
 	if err := ctx.Err(); err != nil {
 		return PairReport{}, fmt.Errorf("analyze pair %s: %w", pair.Internal, err)
@@ -144,6 +130,7 @@ func (a *Analyzer) analyzePair(ctx context.Context, graph *Graph, pair Pair) (Pa
 
 	uses := retainedUses(graph, pair.Internal)
 	report.Rewrites = uses.rewrites(pair.External)
+	report.ExternalAlreadyUsed = externalImporters(graph, pair.External)
 
 	// The effect inventory is walked once and shared. It parses every file of
 	// the internal package, and running it twice made the report and the
@@ -151,13 +138,27 @@ func (a *Analyzer) analyzePair(ctx context.Context, graph *Graph, pair Pair) (Pa
 	changes := inventoryEffects(graph, internal, uses)
 	report.Analyses = []AnalysisReport{
 		analyzeMarkers(graph, pair),
-		analyzeConversions(graph, pair),
-		analyzeMethodSets(graph, internal, external, uses),
-		analyzeFieldIdentity(graph, internal, external),
-		analyzeGlobalEffects(internal, changes),
+		analyzeReachability(graph, pair, uses, report.ExternalAlreadyUsed),
 	}
+	if len(report.Rewrites) == 0 {
+		// Nothing retained names an internal symbol, so no declaration is
+		// replaced. Conversion, method-set, and field identity are still named
+		// in the report, but explicitly as inapplicable rather than as a false
+		// claim that Kubernetes' internal and external declarations are equal.
+		report.Analyses = append(report.Analyses,
+			pruningOnlyAnalysis(AnalysisConversions, pair),
+			pruningOnlyAnalysis(AnalysisMethodSets, pair),
+			pruningOnlyAnalysis(AnalysisFieldIdentity, pair),
+		)
+	} else {
+		report.Analyses = append(report.Analyses,
+			analyzeConversions(graph, pair),
+			analyzeMethodSets(graph, internal, external, uses),
+			analyzeFieldIdentity(graph, internal, external),
+		)
+	}
+	report.Analyses = append(report.Analyses, analyzeGlobalEffects(internal, changes))
 	report.BehaviorChanges = changes
-	report.ExternalAlreadyUsed = externalImporters(graph, pair.External)
 	report.PublicAPIDifferences = slices.Clone(graph.PublicAPIDifferences)
 
 	for _, analysis := range report.Analyses {
@@ -166,7 +167,7 @@ func (a *Analyzer) analyzePair(ctx context.Context, graph *Graph, pair Pair) (Pa
 	}
 	// A public API difference blocks regardless of which proof passed. The
 	// module is published under immutable tags, so a consumer's build breaking
-	// is not something the five proofs can outvote.
+	// is not something the proofs can outvote.
 	for _, difference := range report.PublicAPIDifferences {
 		report.Blockers = append(report.Blockers,
 			"pruning changes the generated public API: "+difference)
@@ -188,6 +189,27 @@ func (a *Analyzer) analyzePair(ctx context.Context, graph *Graph, pair Pair) (Pa
 // retained code still names an internal type: when nothing does, the internal
 // package is dead and pruning it is the whole change, which is both simpler
 // and safer than rewriting references that do not exist.
+// pruningOnlyAnalysis records why a substitution proof is inapplicable without
+// claiming the two packages are interchangeable. Kubernetes' internal API types
+// may intentionally differ in serialization tags and helper methods from their
+// public counterparts; those differences matter when a retained reference is
+// rewritten and do not matter when the internal package is unreachable.
+func pruningOnlyAnalysis(name string, pair Pair) AnalysisReport {
+	subject := name
+	switch name {
+	case AnalysisConversions:
+		subject = "generated conversion bodies"
+	case AnalysisMethodSets:
+		subject = "method-set identity"
+	case AnalysisFieldIdentity:
+		subject = "field and serialization identity"
+	}
+	return analysisReport(name, []string{
+		"no retained reference to " + pair.Internal + " is rewritten, so " + subject +
+			" is not required to prune the unreachable package; this makes no claim that the declarations are interchangeable",
+	}, nil)
+}
+
 func decideAction(report PairReport) Action {
 	switch {
 	case len(report.Blockers) > 0:

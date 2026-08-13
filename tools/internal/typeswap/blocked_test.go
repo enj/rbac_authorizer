@@ -25,6 +25,29 @@ func mutate(file, old, replacement string) map[string]string {
 	return changed
 }
 
+// withRetainedUse makes the fixture exercise a real type substitution rather
+// than dead-package pruning. The structural proofs are preconditions for this
+// path because the retained alias would change Go type identity.
+func withRetainedUse(files map[string]string) map[string]string {
+	changed := make(map[string]string, len(files))
+	for name, contents := range files {
+		changed[name] = contents
+	}
+	name := validationPkg + "/rule.go"
+	changed[name] = strings.Replace(changed[name],
+		`import (
+	rbacv1 "k8s.io/api/rbac/v1"
+)`,
+		`import (
+	rbacv1 "k8s.io/api/rbac/v1"
+	rbac "k8s.io/kubernetes/pkg/apis/rbac"
+)
+
+// InternalRule is retained code that still names the internal type.
+type InternalRule = rbac.PolicyRule`, 1)
+	return changed
+}
+
 // TestProofsRefuseBrokenSubstitutions is the counterweight to the RBAC proof.
 //
 // A passing proof is only worth something if the same analysis fails on code
@@ -131,7 +154,7 @@ func TestProofsRefuseBrokenSubstitutions(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 
-			f := newFixture(t, test.files)
+			f := newFixture(t, withRetainedUse(test.files))
 			analyzer, err := typeswap.New(ctx, typeswap.Options{
 				Policy: typeswap.PolicyPreferExternal,
 				Pairs:  []typeswap.Pair{rbacPair},
@@ -176,17 +199,7 @@ func TestRetainedUseProducesRewrites(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	files := mutate(validationPkg+"/rule.go",
-		`import (
-	rbacv1 "k8s.io/api/rbac/v1"
-)`,
-		`import (
-	rbacv1 "k8s.io/api/rbac/v1"
-	rbac "k8s.io/kubernetes/pkg/apis/rbac"
-)
-
-// InternalRule is retained code that still names the internal type.
-type InternalRule = rbac.PolicyRule`)
+	files := withRetainedUse(rbacFiles)
 
 	f := newFixture(t, files)
 	analyzer, err := typeswap.New(ctx, typeswap.Options{
@@ -223,6 +236,74 @@ type InternalRule = rbac.PolicyRule`)
 	}
 	if rewrite.Package != validationPkg {
 		t.Errorf("rewrite package = %q, want %q", rewrite.Package, validationPkg)
+	}
+	for _, test := range []struct {
+		name     string
+		mentions string
+	}{
+		{typeswap.AnalysisConversions, "is field preserving"},
+		{typeswap.AnalysisMethodSets, "equivalent method sets"},
+		{typeswap.AnalysisFieldIdentity, "match recursively on field names"},
+	} {
+		analysis, _ := report.Analysis(test.name)
+		if !analysis.Passed {
+			t.Errorf("%s failed for a real rewrite: %v", test.name, analysis.Blockers)
+		}
+		if evidence := strings.Join(analysis.Evidence, "\n"); !strings.Contains(evidence, test.mentions) {
+			t.Errorf("%s rewrite evidence does not mention %q:\n%s", test.name, test.mentions, evidence)
+		}
+	}
+}
+
+// TestDeadPackagePruningDoesNotClaimTypeIdentity models Kubernetes' real RBAC
+// pair: internal and public declarations may differ, but no retained reference
+// is converted from one to the other. Those differences must still block the
+// rewrite path above and must not become a false blocker for dead-code pruning.
+func TestDeadPackagePruningDoesNotClaimTypeIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	externalTypes := externalRBAC + "/types.go"
+	conversionFile := internalRBACV1 + "/zz_generated.conversion.go"
+	files := mutate(externalTypes,
+		`json:"resourceNames,omitempty"`,
+		`json:"resource_names,omitempty"`)
+	files[externalTypes] = strings.Replace(files[externalTypes],
+		"// String renders the role for logging.\nfunc (r *Role) String() string { return r.Name }", "", 1)
+	files[conversionFile] = strings.Replace(files[conversionFile],
+		"\tout.NonResourceURLs = *(*[]string)(unsafe.Pointer(&in.NonResourceURLs))\n", "", 1)
+
+	f := newFixture(t, files)
+	analyzer, err := typeswap.New(ctx, typeswap.Options{
+		Policy: typeswap.PolicyPreferExternal,
+		Pairs:  []typeswap.Pair{rbacPair},
+	})
+	if err != nil {
+		t.Fatalf("new analyzer: %v", err)
+	}
+	graph := f.graph(rbacRetained...)
+	graph.PrunedFiles = rbacPruned
+	result, err := analyzer.Analyze(ctx, graph)
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	report, _ := result.Pair(internalRBAC)
+	if report.Action != typeswap.ActionPruneInternal {
+		t.Fatalf("action = %q, want %q; blockers: %v", report.Action, typeswap.ActionPruneInternal, report.Blockers)
+	}
+	for _, name := range []string{
+		typeswap.AnalysisConversions,
+		typeswap.AnalysisMethodSets,
+		typeswap.AnalysisFieldIdentity,
+	} {
+		analysis, _ := report.Analysis(name)
+		if !analysis.Passed {
+			t.Errorf("inapplicable %s analysis blocked pruning: %v", name, analysis.Blockers)
+		}
+		evidence := strings.Join(analysis.Evidence, "\n")
+		if !strings.Contains(evidence, "makes no claim that the declarations are interchangeable") {
+			t.Errorf("%s evidence claims or implies type identity:\n%s", name, evidence)
+		}
 	}
 }
 

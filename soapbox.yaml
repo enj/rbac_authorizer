@@ -92,7 +92,9 @@ closure:
 types:
   policy: prefer-external
   # Retained code already uses k8s.io/api/rbac/v1, so the internal package is
-  # pruned rather than rewritten.
+  # unreachable and pruned without rewriting a type. The pair records upstream's
+  # intended API relationship; it does not claim the declarations' wire tags and
+  # method sets are identical.
   pairs:
     - internal: k8s.io/kubernetes/pkg/apis/rbac
       external: k8s.io/api/rbac/v1
