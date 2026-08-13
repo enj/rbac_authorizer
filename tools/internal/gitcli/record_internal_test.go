@@ -22,7 +22,7 @@ func TestParseCommitRecordsFailsClosed(t *testing.T) {
 	record := func(name, subject string) string {
 		fields := make([]string, commitFieldCount)
 		fields[0] = name
-		fields[11] = subject
+		fields[commitSubjectField] = subject
 		return strings.Join(fields, "\x00") + "\x00"
 	}
 

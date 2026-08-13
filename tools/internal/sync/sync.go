@@ -284,7 +284,11 @@ type run struct {
 	// prior is the record this run resumes from, zero for a destination that
 	// holds none. It is loaded before anything is written, because it decides
 	// which commit the replayed history attaches to.
-	prior  state.Document
+	prior state.Document
+	// parent is the control-plane commit the generated history attaches to. On
+	// the first run it is the setup-derived branch (remote when published, local
+	// HEAD during a pre-push rehearsal); later runs recover it from state.
+	parent string
 	result Result
 }
 
@@ -406,6 +410,9 @@ func (r *run) execute(ctx context.Context) (*Result, error) {
 	if err := r.loadPrior(ctx); err != nil {
 		return nil, err
 	}
+	if err := r.resolveParent(ctx); err != nil {
+		return nil, err
+	}
 	if err := r.writeTree(ctx); err != nil {
 		return nil, err
 	}
@@ -430,12 +437,112 @@ func (r *run) execute(ctx context.Context) (*Result, error) {
 }
 
 // writeTree writes the generated module as blobs and a tree.
+// resolveParent finds the setup/control-plane commit this generated history must
+// preserve and descend from.
+//
+// State is authoritative after the first run. Before state exists, a published
+// destination branch is authoritative; a local HEAD is accepted only for the
+// deliberate pre-push rehearsal where setup has been committed locally but the
+// destination branch does not exist yet. An entirely empty destination is
+// refused because a generated-only root would discard soapbox.yaml, patches,
+// the pinned shim, and the workflows that make the repository maintainable.
+func (r *run) resolveParent(ctx context.Context) error {
+	candidate := r.prior.Epoch.Destination
+	if candidate == "" {
+		candidate = r.observed[r.branchRef()]
+	}
+	if candidate == "" {
+		hasHead, err := r.git.HasHead(ctx)
+		if err != nil {
+			return fmt.Errorf("synchronization: inspect the setup-derived branch: %w", err)
+		}
+		if !hasHead {
+			return fmt.Errorf("%w: the destination has no setup-derived branch to preserve; run setup, commit its control-plane files, and synchronize from that checkout", ErrUnsupported)
+		}
+		candidate = "HEAD"
+	}
+	parent, err := r.git.ResolveCommit(ctx, candidate)
+	if err != nil {
+		return fmt.Errorf("synchronization: resolve the setup-derived parent %s: %w", candidate, err)
+	}
+	r.parent = parent
+	return nil
+}
+
 func (r *run) writeTree(ctx context.Context) error {
-	tree, err := treebuild.WriteFileSet(ctx, r.git, r.opts.Module.Files)
+	parentTree, err := r.git.ResolveTree(ctx, r.parent)
+	if err != nil {
+		return fmt.Errorf("synchronization: resolve the control-plane tree: %w", err)
+	}
+	parentFiles, err := r.git.ListTree(ctx, parentTree)
+	if err != nil {
+		return fmt.Errorf("synchronization: read the control-plane tree: %w", err)
+	}
+	if err := checkControlPlane(parentFiles); err != nil {
+		return err
+	}
+
+	generated, err := treebuild.WriteFileSet(ctx, r.git, r.opts.Module.Files)
 	if err != nil {
 		return fmt.Errorf("synchronization: %w", err)
 	}
-	r.result.Tree = tree
+	generatedPaths := make(map[string]bool, len(generated.Files))
+	entries := make([]gitcli.TreeEntry, 0, len(parentFiles)+len(generated.Files))
+	for _, file := range generated.Files {
+		generatedPaths[file.Path] = true
+	}
+	for _, file := range parentFiles {
+		if generatedPaths[file.Path] || generatedOwnedPath(r.opts.Config, file.Path) {
+			continue
+		}
+		entries = append(entries, file)
+	}
+	for _, file := range generated.Files {
+		entries = append(entries, gitcli.TreeEntry{Mode: file.Mode, Object: file.Object, Path: file.Path})
+	}
+	fullTree, err := r.git.WriteTree(ctx, entries)
+	if err != nil {
+		return fmt.Errorf("synchronization: compose the generated and control-plane trees: %w", err)
+	}
+	generated.Tree = fullTree
+	r.result.Tree = generated
+	return nil
+}
+
+// generatedOwnedPath identifies paths replaced as a unit on every generation.
+// Everything else in the parent tree is control-plane or operator-owned content
+// and survives the replay. Prefix ownership is needed for shrinking closures:
+// retaining only paths present in the new FileSet would leave deleted upstream
+// files behind forever.
+func generatedOwnedPath(cfg *config.Config, name string) bool {
+	switch name {
+	case "go.mod", "go.sum", "LICENSE", "NOTICE", "README.md", "doc.go",
+		cfg.Facade.File, cfg.Facade.AssertionsFile:
+		return true
+	}
+	prefix := strings.TrimSuffix(cfg.Destination.InternalPrefix, "/")
+	return name == prefix || strings.HasPrefix(name, prefix+"/")
+}
+
+// checkControlPlane proves the parent is a setup-derived repository rather than
+// merely whichever commit happened to be HEAD in the supplied directory.
+func checkControlPlane(files []gitcli.TreeEntry) error {
+	present := make(map[string]bool, len(files))
+	for _, file := range files {
+		present[file.Path] = true
+	}
+	for _, required := range []string{
+		".github/workflows/ci.yml",
+		".github/workflows/sync.yml",
+		"go.mod",
+		"soapbox.yaml",
+		"tools/cmd/soapbox/main.go",
+		"tools/go.mod",
+	} {
+		if !present[required] {
+			return fmt.Errorf("%w: the setup-derived parent does not contain %s", ErrUnsupported, required)
+		}
+	}
 	return nil
 }
 
@@ -463,7 +570,7 @@ func (r *run) replay(ctx context.Context) error {
 		}},
 		Epoch: replay.Epoch{
 			ProfileHash: r.opts.Module.Report.Engine.ProfileHash,
-			Parent:      r.prior.Epoch.Destination,
+			Parent:      r.parent,
 		},
 		Bot:           replay.Identity{Name: r.bot.Name, Email: r.bot.Email},
 		ProvenanceKey: r.opts.Config.Commit.TrailerKey,
@@ -540,7 +647,7 @@ func (r *run) record(ctx context.Context) error {
 		Epoch: state.Epoch{
 			Profile:     r.opts.Module.Report.Engine.ProfileHash,
 			Source:      r.opts.Release.Commit,
-			Destination: r.prior.Epoch.Destination,
+			Destination: r.parent,
 		},
 		Cursors: []state.Cursor{{
 			Ref:         r.opts.Release.Ref,
@@ -817,6 +924,12 @@ func validateRelease(rel Release) error {
 	if rel.Author.Name == "" || rel.Author.Email == "" || rel.Author.Date == "" {
 		return errors.New("synchronization: the upstream author needs a name, an address, and a date")
 	}
+	if err := gitcli.ValidateRawDate(rel.Author.Date); err != nil {
+		return fmt.Errorf("synchronization: upstream author date: %w", err)
+	}
+	if err := gitcli.ValidateRawDate(rel.CommitterDate); err != nil {
+		return fmt.Errorf("synchronization: upstream committer date: %w", err)
+	}
 	return nil
 }
 
@@ -872,9 +985,9 @@ func readRelease(ctx context.Context, git *gitcli.Runner, cache string, cfg *con
 		Author: gitcli.Signature{
 			Name:  commit.AuthorName,
 			Email: commit.AuthorEmail,
-			Date:  commit.AuthorDate,
+			Date:  commit.AuthorDateRaw,
 		},
-		CommitterDate: commit.CommitterDate,
+		CommitterDate: commit.CommitterDateRaw,
 		Message:       commit.RawMessage,
 	}, nil
 }

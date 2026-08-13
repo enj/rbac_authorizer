@@ -340,7 +340,7 @@ func (m Manifest) Text() string {
 	fmt.Fprintf(&b, "  engine       %s toolchain %s\n", m.Engine.Version, m.Engine.Toolchain)
 	fmt.Fprintf(&b, "  profile      %s\n", m.Engine.ProfileHash)
 	fmt.Fprintf(&b, "  module       %s release %s\n", m.Module.Module, m.Source.ReleaseTag)
-	fmt.Fprintf(&b, "  tree         %s (%d files, %d packages)\n",
+	fmt.Fprintf(&b, "  tree         %s (%d generated files, %d generated packages)\n",
 		m.Objects.Tree, m.Module.Files, m.Module.Packages)
 	fmt.Fprintf(&b, "  commit       %s\n", m.Objects.Commit)
 	fmt.Fprintf(&b, "  tag          %s -> %s\n", m.Objects.Tag, m.Objects.TagTarget)

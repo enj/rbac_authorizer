@@ -71,19 +71,65 @@ type destination struct {
 	git    *gitcli.Runner
 	dir    string
 	remote string
+	parent string
 }
 
 func newDestination(ctx context.Context, t *testing.T) *destination {
 	t.Helper()
 	dir := t.TempDir()
-	local := newRepository(ctx, t, dir, "work")
+	local := newRepository(ctx, t, dir, testBranch)
 
 	remoteRoot := t.TempDir()
 	remote := newRepository(ctx, t, remoteRoot, testBranch)
 	if err := remote.SetConfigLocal(ctx, "core.bare", "true"); err != nil {
 		t.Fatalf("make the remote bare: %v", err)
 	}
-	return &destination{git: local, dir: dir, remote: filepath.Join(remoteRoot, ".git")}
+	parent := writeControlPlane(ctx, t, local)
+	return &destination{git: local, dir: dir, remote: filepath.Join(remoteRoot, ".git"), parent: parent}
+}
+
+// writeControlPlane creates the setup-derived commit that every replay preserves.
+// It is local but not published, matching a dry run performed before the initial
+// control-plane push. Fixed content and identity make its object name independent
+// of the temporary repository path.
+func writeControlPlane(ctx context.Context, t *testing.T, git *gitcli.Runner) string {
+	t.Helper()
+	files := []struct{ path, contents string }{
+		{".github/workflows/ci.yml", "name: ci\n"},
+		{".github/workflows/sync.yml", "name: sync\n"},
+		{".gitignore", "/bin/\n"},
+		{"go.mod", "module " + testModulePath + "\n\ngo 1.26.0\n"},
+		{"internal/kk/stale/stale.go", "package stale\n"},
+		{"patches/index.yaml", "patches: []\n"},
+		{"soapbox.yaml", "version: 1\n"},
+		{"tools/cmd/soapbox/main.go", "package main\n"},
+		{"tools/go.mod", "module " + testModulePath + "/tools\n\ngo 1.26.0\n"},
+	}
+	entries := make([]gitcli.TreeEntry, 0, len(files))
+	for _, file := range files {
+		object, err := git.WriteBlob(ctx, []byte(file.contents))
+		if err != nil {
+			t.Fatalf("write control-plane blob %s: %v", file.path, err)
+		}
+		entries = append(entries, gitcli.TreeEntry{Mode: gitcli.ModeRegular, Object: object, Path: file.path})
+	}
+	tree, err := git.WriteTree(ctx, entries)
+	if err != nil {
+		t.Fatalf("write control-plane tree: %v", err)
+	}
+	commit, err := git.WriteCommit(ctx, gitcli.CommitTreeOptions{
+		Tree:      tree,
+		Author:    testSignature,
+		Committer: testSignature,
+		Message:   "chore: set up derived repository\n",
+	})
+	if err != nil {
+		t.Fatalf("write control-plane commit: %v", err)
+	}
+	if err := git.CreateRef(ctx, testBranchRef, commit); err != nil {
+		t.Fatalf("create local control-plane branch: %v", err)
+	}
+	return commit
 }
 
 // newRepository initializes one repository with an isolated environment.
@@ -120,6 +166,19 @@ func (d *destination) options() sync.ProjectOptions {
 			AllowLocalRemote: true,
 		},
 		BotDate: testSignature.Date,
+	}
+}
+
+// publishControlPlane makes the setup-derived branch visible to the remote,
+// matching the normal first synchronization after repository setup.
+func (d *destination) publishControlPlane(ctx context.Context, t *testing.T) {
+	t.Helper()
+	if err := d.git.PushAtomic(ctx, d.remote, []gitcli.PushUpdate{{
+		Ref:          testBranchRef,
+		New:          d.parent,
+		ExpectAbsent: true,
+	}}); err != nil {
+		t.Fatalf("publish control-plane branch: %v", err)
 	}
 }
 
@@ -167,7 +226,9 @@ func testConfig() *config.Config {
 			Branch:            testBranch,
 			StateRef:          testStateRef,
 			ProgressRefPrefix: testProgressRef,
+			InternalPrefix:    "internal/kk",
 		},
+		Facade:  config.Facade{File: "rbac.go", AssertionsFile: "zz_generated_assertions.go"},
 		Release: config.Release{Policy: config.ReleasePolicyV1ToV0},
 		Commit: config.Commit{
 			Committer:  config.Identity{Name: testSignature.Name, Email: testSignature.Email},

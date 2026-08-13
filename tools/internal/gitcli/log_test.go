@@ -51,6 +51,12 @@ func TestCommitLogReadsTheGraphInOnePass(t *testing.T) {
 		if !slices.Equal(commit.Parents, graph[i].Parents) {
 			t.Fatalf("commit %s parents %v, graph has %v", commit.SHA, commit.Parents, graph[i].Parents)
 		}
+		if err := gitcli.ValidateRawDate(commit.AuthorDateRaw); err != nil {
+			t.Fatalf("commit %s author raw date %q: %v", commit.SHA, commit.AuthorDateRaw, err)
+		}
+		if err := gitcli.ValidateRawDate(commit.CommitterDateRaw); err != nil {
+			t.Fatalf("commit %s committer raw date %q: %v", commit.SHA, commit.CommitterDateRaw, err)
+		}
 	}
 
 	if commits[0].SHA != up.sha(base) {
@@ -334,9 +340,11 @@ func commitsEqual(a, b gitcli.Commit) bool {
 		a.AuthorName == b.AuthorName &&
 		a.AuthorEmail == b.AuthorEmail &&
 		a.AuthorDate == b.AuthorDate &&
+		a.AuthorDateRaw == b.AuthorDateRaw &&
 		a.CommitterName == b.CommitterName &&
 		a.CommitterEmail == b.CommitterEmail &&
 		a.CommitterDate == b.CommitterDate &&
+		a.CommitterDateRaw == b.CommitterDateRaw &&
 		a.SignatureStatus == b.SignatureStatus &&
 		a.SignerKey == b.SignerKey &&
 		a.Signer == b.Signer &&

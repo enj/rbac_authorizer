@@ -3,11 +3,13 @@ package sync_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/enj/soapbox/tools/internal/extract"
 	"github.com/enj/soapbox/tools/internal/generate"
+	"github.com/enj/soapbox/tools/internal/gitcli"
 	"github.com/enj/soapbox/tools/internal/publish"
 	"github.com/enj/soapbox/tools/internal/sync"
 )
@@ -39,6 +41,32 @@ func TestProjectPlansTheFirstReleaseWithoutTouchingTheRemote(t *testing.T) {
 	if got, want := result.Manifest.Objects.TagTarget, result.Manifest.Objects.Commit; got != want {
 		t.Errorf("tag target = %q, want the replayed commit %q", got, want)
 	}
+	commit, err := dest.git.CommitInfo(ctx, result.Manifest.Objects.Commit)
+	if err != nil {
+		t.Fatalf("read replay commit: %v", err)
+	}
+	if len(commit.Parents) != 1 || commit.Parents[0] != dest.parent {
+		t.Errorf("replay parents = %v, want the setup-derived commit %s", commit.Parents, dest.parent)
+	}
+	entries, err := dest.git.ListTree(ctx, result.Manifest.Objects.Tree)
+	if err != nil {
+		t.Fatalf("read composed tree: %v", err)
+	}
+	paths := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		paths[entry.Path] = true
+	}
+	for _, preserved := range []string{".github/workflows/ci.yml", ".github/workflows/sync.yml", ".gitignore", "patches/index.yaml", "soapbox.yaml", "tools/cmd/soapbox/main.go", "tools/go.mod"} {
+		if !paths[preserved] {
+			t.Errorf("composed tree dropped control-plane path %s", preserved)
+		}
+	}
+	if paths["internal/kk/stale/stale.go"] {
+		t.Error("composed tree retained a stale generated file from the parent")
+	}
+	if got := result.Document.Epoch.Destination; got != dest.parent {
+		t.Errorf("state epoch parent = %q, want setup-derived commit %q", got, dest.parent)
+	}
 
 	// Three refs, each created, and every one of them still absent.
 	want := map[string]publish.Effect{
@@ -65,6 +93,79 @@ func TestProjectPlansTheFirstReleaseWithoutTouchingTheRemote(t *testing.T) {
 	if refs := dest.remoteRefs(ctx, t); len(refs) != 0 {
 		t.Errorf("the remote holds %v after planning, want nothing: a plan publishes nothing", refs)
 	}
+}
+
+func TestProjectRefusesWithoutASetupDerivedParent(t *testing.T) {
+	ctx := t.Context()
+	localRoot := t.TempDir()
+	local := newRepository(ctx, t, localRoot, testBranch)
+	remoteRoot := t.TempDir()
+	remote := newRepository(ctx, t, remoteRoot, testBranch)
+	if err := remote.SetConfigLocal(ctx, "core.bare", "true"); err != nil {
+		t.Fatalf("make the remote bare: %v", err)
+	}
+	dest := &destination{git: local, dir: localRoot, remote: filepath.Join(remoteRoot, ".git")}
+
+	if _, err := sync.Project(ctx, dest.options()); !errors.Is(err, sync.ErrUnsupported) {
+		t.Fatalf("project = %v, want a missing control-plane refusal", err)
+	}
+	if refs := dest.remoteRefs(ctx, t); len(refs) != 0 {
+		t.Errorf("the remote holds %v after the refusal, want nothing", refs)
+	}
+}
+
+func TestProjectRefusesAnUnrelatedParent(t *testing.T) {
+	ctx := t.Context()
+	localRoot := t.TempDir()
+	local := newRepository(ctx, t, localRoot, testBranch)
+	object, err := local.WriteBlob(ctx, []byte("not a soapbox repository\n"))
+	if err != nil {
+		t.Fatalf("write unrelated blob: %v", err)
+	}
+	tree, err := local.WriteTree(ctx, []gitcli.TreeEntry{{Mode: gitcli.ModeRegular, Object: object, Path: "README.md"}})
+	if err != nil {
+		t.Fatalf("write unrelated tree: %v", err)
+	}
+	commit, err := local.WriteCommit(ctx, gitcli.CommitTreeOptions{
+		Tree: tree, Author: testSignature, Committer: testSignature, Message: "chore: unrelated\n",
+	})
+	if err != nil {
+		t.Fatalf("write unrelated commit: %v", err)
+	}
+	if err := local.CreateRef(ctx, testBranchRef, commit); err != nil {
+		t.Fatalf("create unrelated HEAD: %v", err)
+	}
+	remoteRoot := t.TempDir()
+	remote := newRepository(ctx, t, remoteRoot, testBranch)
+	if err := remote.SetConfigLocal(ctx, "core.bare", "true"); err != nil {
+		t.Fatalf("make the remote bare: %v", err)
+	}
+	dest := &destination{git: local, dir: localRoot, remote: filepath.Join(remoteRoot, ".git")}
+
+	if _, err := sync.Project(ctx, dest.options()); !errors.Is(err, sync.ErrUnsupported) {
+		t.Fatalf("project = %v, want an unrelated control-plane refusal", err)
+	}
+}
+
+func TestProjectFastForwardsAPublishedControlPlane(t *testing.T) {
+	ctx := t.Context()
+	dest := newDestination(ctx, t)
+	dest.publishControlPlane(ctx, t)
+
+	result, err := sync.Project(ctx, dest.options())
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	for _, action := range result.Manifest.Publish.Actions {
+		if action.Ref != testBranchRef {
+			continue
+		}
+		if action.Effect != publish.EffectFastForward || action.OldObject != dest.parent {
+			t.Errorf("branch action = %+v, want a fast-forward from setup commit %s", action, dest.parent)
+		}
+		return
+	}
+	t.Fatal("publication plan has no consumer branch action")
 }
 
 // TestPlanIsDeterministicAcrossRoots proves the manifest describes the work

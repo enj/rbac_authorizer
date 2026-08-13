@@ -835,17 +835,23 @@ type Commit struct {
 	SHA string
 	// Parents are the parent object names in git's order, so Parents[0] is the
 	// first parent and defines the mainline. A root commit has none.
-	Parents         []string
-	AuthorName      string
-	AuthorEmail     string
-	AuthorDate      string
-	CommitterName   string
-	CommitterEmail  string
-	CommitterDate   string
-	SignatureStatus string
-	SignerKey       string
-	Signer          string
-	Subject         string
+	Parents     []string
+	AuthorName  string
+	AuthorEmail string
+	// AuthorDate is Git's strict ISO 8601 rendering for display and comparison.
+	AuthorDate string
+	// AuthorDateRaw is Git's original "<seconds> <offset>" form for replay.
+	AuthorDateRaw  string
+	CommitterName  string
+	CommitterEmail string
+	// CommitterDate is Git's strict ISO 8601 rendering.
+	CommitterDate string
+	// CommitterDateRaw is Git's original raw form for deterministic replay.
+	CommitterDateRaw string
+	SignatureStatus  string
+	SignerKey        string
+	Signer           string
+	Subject          string
 	// RawMessage is the complete commit message including the subject line, so
 	// replaying it must not append the subject again.
 	RawMessage string
@@ -887,14 +893,15 @@ func (c Commit) TrailerValues(key string) []string {
 // keeps the record shape, and therefore the parser and the field count,
 // identical either way.
 const (
-	commitFieldsIdentity  = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI"
+	commitFieldsIdentity  = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%ad%x00%cn%x00%ce%x00%cI%x00%cd"
 	commitFieldsSigned    = "%x00%G?%x00%GK%x00%GS"
 	commitFieldsUnsigned  = "%x00%x00%x00"
 	commitFieldsMessage   = "%x00%s%x00%B%x00%(trailers:only=true,unfold=true)"
 	commitFormat          = commitFieldsIdentity + commitFieldsSigned + commitFieldsMessage
 	commitFormatUnsigned  = commitFieldsIdentity + commitFieldsUnsigned + commitFieldsMessage
-	commitFieldCount      = 14
+	commitFieldCount      = 16
 	commitObjectNameField = 0
+	commitSubjectField    = 13
 )
 
 // CommitInfo reads metadata, signature status, and trailers for one revision.
@@ -904,7 +911,7 @@ func (r *Runner) CommitInfo(ctx context.Context, revision string) (Commit, error
 	}
 	// The message, identities, and trailers are upstream content that is
 	// replayed verbatim, so this read bypasses the redactor.
-	out, err := r.runRaw(ctx, nil, "log", "-z", "-1", "--no-patch", "--format="+commitFormat, "--end-of-options", revision, "--")
+	out, err := r.runRaw(ctx, nil, "log", "-z", "-1", "--no-patch", "--date=raw", "--format="+commitFormat, "--end-of-options", revision, "--")
 	if err != nil {
 		return Commit{}, fmt.Errorf("git commit metadata for %q: %w", r.redactor.String(revision), err)
 	}
@@ -973,7 +980,7 @@ func (r *Runner) CommitLog(ctx context.Context, opts CommitLogOptions) ([]Commit
 	if opts.Signatures {
 		format = commitFormat
 	}
-	args := []string{"log", "-z", "--no-patch", "--topo-order", "--reverse", "--format=" + format}
+	args := []string{"log", "-z", "--no-patch", "--topo-order", "--reverse", "--date=raw", "--format=" + format}
 	if opts.FirstParent {
 		args = append(args, "--first-parent")
 	}
@@ -1033,20 +1040,22 @@ func parseCommitRecords(out string) ([]Commit, error) {
 			return nil, fmt.Errorf("record %d does not begin with an object name", start/commitFieldCount)
 		}
 		commits = append(commits, Commit{
-			SHA:             record[0],
-			Parents:         strings.Fields(record[1]),
-			AuthorName:      record[2],
-			AuthorEmail:     record[3],
-			AuthorDate:      record[4],
-			CommitterName:   record[5],
-			CommitterEmail:  record[6],
-			CommitterDate:   record[7],
-			SignatureStatus: record[8],
-			SignerKey:       record[9],
-			Signer:          record[10],
-			Subject:         record[11],
-			RawMessage:      record[12],
-			Trailers:        parseTrailers(record[13]),
+			SHA:              record[0],
+			Parents:          strings.Fields(record[1]),
+			AuthorName:       record[2],
+			AuthorEmail:      record[3],
+			AuthorDate:       record[4],
+			AuthorDateRaw:    record[5],
+			CommitterName:    record[6],
+			CommitterEmail:   record[7],
+			CommitterDate:    record[8],
+			CommitterDateRaw: record[9],
+			SignatureStatus:  record[10],
+			SignerKey:        record[11],
+			Signer:           record[12],
+			Subject:          record[13],
+			RawMessage:       record[14],
+			Trailers:         parseTrailers(record[15]),
 		})
 	}
 	return commits, nil

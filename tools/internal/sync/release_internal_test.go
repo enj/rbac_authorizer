@@ -89,8 +89,11 @@ func TestReadReleaseReportsWhatTheUpstreamTagRecords(t *testing.T) {
 	if release.Author.Name != "Upstream Author" || release.Author.Date == "" {
 		t.Errorf("author = %+v, want the upstream author with a date", release.Author)
 	}
-	if release.CommitterDate == "" {
-		t.Errorf("committer date is empty, want the upstream one")
+	if err := gitcli.ValidateRawDate(release.Author.Date); err != nil {
+		t.Errorf("author date %q is not replayable: %v", release.Author.Date, err)
+	}
+	if err := gitcli.ValidateRawDate(release.CommitterDate); err != nil {
+		t.Errorf("committer date %q is not replayable: %v", release.CommitterDate, err)
 	}
 	const wantURL = "https://github.com/kubernetes/kubernetes/releases/tag/" + upstreamTag
 	if release.URL != wantURL {
