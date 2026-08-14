@@ -258,7 +258,7 @@ vanity:
 # Publication mode. Manual requires an exact reviewed approval; automatic adds
 # -unattended so scheduled sync runs reconcile without further intervention.
 publication:
-  mode: manual
+  mode: automatic
 
 # Compatibility mode. Local means the generated module may use in-tree apiserver
 # helpers that are not published as staging modules.

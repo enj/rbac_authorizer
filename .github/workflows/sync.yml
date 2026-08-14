@@ -6,9 +6,8 @@
 # the maintained logic is one Go invocation; the workflow supplies a checkout, a
 # toolchain, and the GITHUB_TOKEN for authenticated pushes.
 #
-# An empty approval input is plan-only. After reviewing its exact hash, an
-# operator may dispatch again with that hash; it travels in the environment,
-# never in the command line. Automatic mode is the only self-approval path.
+# The invocation runs unattended: a scheduled run publishes without further
+# human intervention once the profile has been approved.
 name: sync
 
 on:
@@ -16,10 +15,11 @@ on:
     - cron: '37 4 * * *'
   workflow_dispatch:
     inputs:
-      approve:
-        description: Exact reconciliation plan hash to apply; empty plans only
+      verify-write:
+        description: Verify GITHUB_TOKEN write access without processing releases
         required: false
-        type: string
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -49,9 +49,15 @@ jobs:
       - name: Build the engine shim
         working-directory: tools
         run: go build -o ${{ runner.temp }}/soapbox ./cmd/soapbox
-      - name: Synchronize with upstream
+      - name: Verify write access
+        if: inputs.verify-write
         working-directory: tools
         env:
           SOAPBOX_GITHUB_TOKEN: ${{ github.token }}
-          SOAPBOX_APPROVAL: ${{ inputs.approve }}
-        run: ${{ runner.temp }}/soapbox sync -dir .. -destination .. -cache ${{ runner.temp }}/soapbox-cache
+        run: ${{ runner.temp }}/soapbox sync -dir .. -destination .. -cache ${{ runner.temp }}/soapbox-cache -verify-write
+      - name: Synchronize with upstream
+        if: ${{ !inputs.verify-write }}
+        working-directory: tools
+        env:
+          SOAPBOX_GITHUB_TOKEN: ${{ github.token }}
+        run: ${{ runner.temp }}/soapbox sync -dir .. -destination .. -cache ${{ runner.temp }}/soapbox-cache -unattended
